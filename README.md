@@ -219,17 +219,6 @@ src/
 └── types.ts          # 类型定义
 ```
 
-## 发布
-
-```bash
-# 构建 + 发布（prepublishOnly 会自动 build）
-npm run build
-npm publish
-
-# 发布到国内镜像
-npm publish --registry=https://registry.npmmirror.com
-```
-
 ## 参考
 
 - [蓝湖官网](https://lanhuapp.com)
