@@ -15,113 +15,201 @@
 ## 安装
 
 ```bash
-npm install -g lanhu-mcp-server
+npm install -g dc-lanhu-mcp-server
 ```
 
 或免安装直接使用：
 
 ```bash
-npx lanhu-mcp-server
+npx dc-lanhu-mcp-server
 ```
 
-## 配置到 Agent MCP
+## 配置方式
 
-### Claude Code
+### 快速开始（30 秒）
+
+**个人开发者** — 一行命令注册到 Claude Code：
 
 ```bash
-# 方式一：命令行（推荐）
-claude mcp add lanhu-mcp -e LANHU_COOKIE="你的cookie" -e LANHU_AUTHORIZATION="你的token" -- npx lanhu-mcp-server
+claude mcp add lanhu-mcp \
+  -e LANHU_COOKIE="你的cookie" \
+  -e LANHU_AUTHORIZATION="你的token" \
+  -- npx dc-lanhu-mcp-server
+```
 
-# 方式二：指定本地安装路径
-claude mcp add lanhu-mcp -e LANHU_COOKIE="你的cookie" -- node /path/to/lanhu-mcp-server/dist/index.js
+**团队协作** — 项目根目录创建 `.mcp.json`，配置随代码走：
+
+```json
+{
+  "mcpServers": {
+    "lanhu-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["dc-lanhu-mcp-server"],
+      "env": {
+        "LANHU_COOKIE": "你的cookie",
+        "LANHU_AUTHORIZATION": "你的token"
+      }
+    }
+  }
+}
+```
+
+### 配置方式对比
+
+| 方式 | 适用场景 | 配置位置 | 特点 |
+|------|---------|---------|------|
+| **CLI 注册** | 个人开发 | `~/.claude/settings.json` | 一行命令，全局生效 |
+| **项目级配置** | 团队协作 | 项目 `.mcp.json` | 可提交 git，团队共享 |
+| **环境变量** | CI/CD、临时测试 | `process.env` | 运行时注入，最高优先级 |
+| **交互引导** | 首次使用 | `.env` 或 `settings.json` | 无配置时自动提示 |
+| **手动编辑** | 高级用户 | 任意配置文件 | 完全控制 |
+
+### 方式 1：CLI 注册（推荐个人使用）
+
+通过 Claude Code CLI 注册，配置写入全局 `~/.claude/settings.json`：
+
+```bash
+# 使用 npx（免安装）
+claude mcp add lanhu-mcp \
+  -e LANHU_COOKIE="你的cookie" \
+  -e LANHU_AUTHORIZATION="你的token" \
+  -- npx dc-lanhu-mcp-server
+
+# 使用本地安装路径（更快启动）
+claude mcp add lanhu-mcp \
+  -e LANHU_COOKIE="你的cookie" \
+  -- node /path/to/dc-lanhu-mcp-server/dist/index.js
 
 # 验证是否添加成功
 claude mcp list
 ```
 
-或在 `~/.claude/settings.json` 中手动配置：
+### 方式 2：项目级配置（推荐团队使用）
+
+在项目根目录创建 `.mcp.json`，配置随项目走，可提交到 git：
 
 ```json
 {
   "mcpServers": {
     "lanhu-mcp": {
+      "type": "stdio",
       "command": "npx",
-      "args": ["lanhu-mcp-server"],
+      "args": ["dc-lanhu-mcp-server"],
       "env": {
-        "LANHU_COOKIE": "你的蓝湖 Cookie",
-        "LANHU_AUTHORIZATION": "你的 Authorization Token"
+        "LANHU_COOKIE": "你的cookie",
+        "LANHU_AUTHORIZATION": "你的token",
+        "LANHU_PROJECT_ID": "可选：默认项目 ID"
       }
     }
   }
 }
 ```
 
-### Cursor
+**优势：**
+- ✅ 配置跟随项目，新成员 clone 后即可使用
+- ✅ 可加入 `.gitignore` 保护敏感信息，或用环境变量替换
+- ✅ Server 启动时自动发现，零配置运行
 
-在 Cursor 中打开 **Settings → MCP → Add new MCP server**，填写：
+**支持路径：**
+- `.mcp.json`（标准）
+- `.cursor/mcp.json`（Cursor 专用）
 
-| 字段 | 值 |
-|------|------|
-| Name | `lanhu-mcp` |
-| Type | `command` |
-| Command | `npx lanhu-mcp-server` |
+### 方式 3：环境变量注入
 
-然后在环境变量中添加 `LANHU_COOKIE` 和 `LANHU_AUTHORIZATION`。
+通过环境变量传递，适用于 CI/CD 或临时测试：
 
-或直接编辑 `~/.cursor/mcp.json`：
+```bash
+# 临时设置
+export LANHU_COOKIE="你的cookie"
+export LANHU_AUTHORIZATION="你的token"
+npx dc-lanhu-mcp-server
+
+# 或一行命令
+LANHU_COOKIE="你的cookie" LANHU_AUTHORIZATION="你的token" npx dc-lanhu-mcp-server
+```
+
+**优先级最高** — 会覆盖所有配置文件中的值。
+
+### 方式 4：交互引导
+
+首次运行时无任何配置，Server 会自动进入交互引导：
+
+```bash
+npx dc-lanhu-mcp-server
+```
+
+引导流程：
+1. 提示输入 Cookie 和 Authorization
+2. 选择写入位置（`.env` / `settings.json` / 两者）
+3. 自动保存，下次启动无需重复输入
+
+### 方式 5：手动编辑配置文件
+
+直接编辑配置文件，适合高级用户：
+
+**Claude Code** — `~/.claude/settings.json`：
 
 ```json
 {
   "mcpServers": {
     "lanhu-mcp": {
       "command": "npx",
-      "args": ["lanhu-mcp-server"],
+      "args": ["dc-lanhu-mcp-server"],
       "env": {
-        "LANHU_COOKIE": "你的蓝湖 Cookie",
-        "LANHU_AUTHORIZATION": "你的 Authorization Token"
+        "LANHU_COOKIE": "你的cookie",
+        "LANHU_AUTHORIZATION": "你的token"
       }
     }
   }
 }
 ```
 
-### Cline (VS Code)
-
-在 VS Code 中打开 Cline 设置 → MCP Servers → 编辑配置：
+**Cursor** — `~/.cursor/mcp.json` 或项目 `.cursor/mcp.json`：
 
 ```json
 {
   "mcpServers": {
     "lanhu-mcp": {
       "command": "npx",
-      "args": ["lanhu-mcp-server"],
+      "args": ["dc-lanhu-mcp-server"],
       "env": {
-        "LANHU_COOKIE": "你的蓝湖 Cookie",
-        "LANHU_AUTHORIZATION": "你的 Authorization Token"
+        "LANHU_COOKIE": "你的cookie",
+        "LANHU_AUTHORIZATION": "你的token"
       }
     }
   }
 }
 ```
 
-### Windsurf
+**Cline (VS Code)** — Cline 设置 → MCP Servers
 
-编辑 `~/.codeium/windsurf/mcp_config.json`：
+**Windsurf** — `~/.codeium/windsurf/mcp_config.json`
 
-```json
-{
-  "mcpServers": {
-    "lanhu-mcp": {
-      "command": "npx",
-      "args": ["lanhu-mcp-server"],
-      "env": {
-        "LANHU_COOKIE": "你的蓝湖 Cookie",
-        "LANHU_AUTHORIZATION": "你的 Authorization Token"
-      }
-    }
-  }
-}
+### 配置优先级
+
+多个配置源共存时，按以下优先级加载（局部 > 全局）：
+
 ```
+process.env → .mcp.json → .env → settings.json → 交互引导
+     ↑            ↑          ↑         ↑             ↑
+  环境变量     项目级配置   本地env   Claude全局    首次兜底
+```
+
+**示例：**
+- 同时有 `.mcp.json` 和 `.env` → 使用 `.mcp.json`
+- 同时有环境变量和配置文件 → 使用环境变量
+- 只有 `settings.json` → 自动回填 `.env`
+
+## 获取蓝湖凭证
+
+1. 登录 [蓝湖网页版](https://lanhuapp.com)
+2. F12 打开开发者工具
+3. 进入 **Network** 标签
+4. 刷新页面，选择任意 Fetch/XHR 请求
+5. 在 **Request Headers** 中复制：
+   - `Cookie` → `LANHU_COOKIE`
+   - `Authorization` → `LANHU_AUTHORIZATION`（可选，部分接口需要）
 
 ## MCP Tools
 
@@ -150,14 +238,6 @@ claude mcp list
 | `LANHU_TENANT_ID` | 否 | 租户 ID（列出项目时需要） |
 | `LANHU_PROJECT_ID` | 否 | 默认项目 ID（不传则需每次指定） |
 | `CHROME_PATH` | 否 | Chrome 路径（`lanhu_download_design` 需要，默认自动检测） |
-
-## 获取蓝湖 Cookie
-
-1. 登录 [蓝湖网页版](https://lanhuapp.com)
-2. F12 打开开发者工具
-3. 进入 **Network** 标签
-4. 选择任意 Fetch/XHR 请求
-5. 在 **Request Headers** 中复制 `Cookie` 和 `Authorization` 的值
 
 ## 测试
 

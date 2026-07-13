@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { config } from "dotenv";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,116 @@ import { registerTools } from "./tools.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
+
+/** Claude Code 配置文件路径 */
+const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
+
+/** 配置写入目标 */
+type ConfigTarget = "env" | "claude" | "both";
+
+/**
+ * 将蓝湖 MCP 配置写入 ~/.claude/settings.json
+ *
+ * 等效于运行:
+ *   claude mcp add lanhu-mcp -e LANHU_COOKIE="..." -e LANHU_AUTHORIZATION="..." -- npx dc-lanhu-mcp-server
+ */
+function writeClaudeConfig(opts: {
+  cookie: string;
+  authorization?: string;
+  tenantId?: string;
+  projectId?: string;
+}): void {
+  let settings: Record<string, unknown> = {};
+  if (fs.existsSync(CLAUDE_SETTINGS_PATH)) {
+    try {
+      settings = JSON.parse(fs.readFileSync(CLAUDE_SETTINGS_PATH, "utf-8"));
+    } catch {
+      console.error(`警告: ${CLAUDE_SETTINGS_PATH} 解析失败，将创建新文件`);
+      settings = {};
+    }
+  }
+
+  // 构造 env 对象
+  const env: Record<string, string> = {
+    LANHU_COOKIE: opts.cookie,
+  };
+  if (opts.authorization) env.LANHU_AUTHORIZATION = opts.authorization;
+  if (opts.tenantId) env.LANHU_TENANT_ID = opts.tenantId;
+  if (opts.projectId) env.LANHU_PROJECT_ID = opts.projectId;
+
+  // 构造 mcpServers 条目
+  const mcpServers =
+    ((settings as Record<string, unknown>).mcpServers as Record<string, unknown>) || {};
+  mcpServers["lanhu-mcp"] = {
+    command: "npx",
+    args: ["dc-lanhu-mcp-server"],
+    env,
+  };
+  (settings as Record<string, unknown>).mcpServers = mcpServers;
+
+  // 确保目录存在
+  const dir = path.dirname(CLAUDE_SETTINGS_PATH);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  fs.writeFileSync(
+    CLAUDE_SETTINGS_PATH,
+    JSON.stringify(settings, null, 2) + "\n",
+    "utf-8"
+  );
+}
+
+/**
+ * 检查 Claude settings.json 中是否已有 lanhu-mcp 配置
+ */
+function hasClaudeConfig(): boolean {
+  if (!fs.existsSync(CLAUDE_SETTINGS_PATH)) return false;
+  try {
+    const settings = JSON.parse(fs.readFileSync(CLAUDE_SETTINGS_PATH, "utf-8"));
+    return !!settings?.mcpServers?.["lanhu-mcp"]?.env?.LANHU_COOKIE;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 从项目 .mcp.json 中读取 lanhu-mcp 的环境变量配置
+ *
+ * .mcp.json 是项目级 MCP 配置，被 Cursor / Claude Code / Cline 等工具识别。
+ * 查找路径：process.cwd()/.mcp.json（当前工作目录）
+ *
+ * 返回 env 对象，未找到或缺少 Cookie 时返回 null
+ */
+function readMcpJsonConfig(): Record<string, string> | null {
+  // 支持 .mcp.json 和 .cursor/mcp.json 两种常见位置
+  const candidates = [
+    path.join(process.cwd(), ".mcp.json"),
+    path.join(process.cwd(), ".cursor", "mcp.json"),
+  ];
+
+  for (const mcpJsonPath of candidates) {
+    if (!fs.existsSync(mcpJsonPath)) continue;
+    try {
+      const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, "utf-8"));
+      // 遍历 mcpServers 找到 lanhu 相关配置（键名可能不完全是 "lanhu-mcp"）
+      const servers = mcpJson?.mcpServers;
+      if (!servers || typeof servers !== "object") continue;
+
+      for (const [key, value] of Object.entries(servers)) {
+        const entry = value as Record<string, unknown> | null;
+        const env = entry?.env as Record<string, string> | undefined;
+        if (env?.LANHU_COOKIE) {
+          console.error(`已从 ${mcpJsonPath} (${key}) 读取配置`);
+          return env;
+        }
+      }
+    } catch {
+      // 解析失败，跳过
+    }
+  }
+  return null;
+}
 
 /**
  * 从蓝湖项目 URL 中提取 projectId
@@ -42,10 +153,19 @@ function extractProjectId(input: string): string | null {
 }
 
 /**
- * 启动前交互式引导用户配置
+ * 启动前配置加载 / 交互式引导
  *
- * MCP Server 使用 stdio 传输协议，
- * 因此交互式提示仅在首次 setup 阶段（stdio 连接之前）进行。
+ * 配置读取优先级（从高到低，局部 > 全局）：
+ *   1. process.env        — 父进程注入（claude mcp add -e / 手动 export）
+ *   2. .mcp.json          — 项目级配置（process.cwd()/.mcp.json 或 .cursor/mcp.json）
+ *   3. .env               — 本地环境变量文件（package 级）
+ *   4. settings.json      — Claude 全局配置（~/.claude/settings.json）
+ *   5. 交互式引导          — 以上均无时，引导用户选择写入目标
+ *
+ * 配置写入目标（首次引导时可选）：
+ *   1. .env 文件（本地环境变量）
+ *   2. ~/.claude/settings.json（等同于 claude mcp add 命令）
+ *   3. 两者都写
  */
 async function promptConfig(): Promise<{
   cookie: string;
@@ -55,62 +175,114 @@ async function promptConfig(): Promise<{
 }> {
   const envPath = path.join(rootDir, ".env");
 
-  // 如果 .env 已存在且包含有效 Cookie，检查是否也需要更新项目
-  if (fs.existsSync(envPath)) {
-    const envContent = fs.readFileSync(envPath, "utf-8");
-    const hasCookie = /^LANHU_COOKIE\s*=.+$/m.test(envContent);
-    const hasProject = /^LANHU_PROJECT_ID\s*=.+$/m.test(envContent);
+  // 最高优先级：进程环境变量已有 Cookie（由父进程 / claude mcp add -e 注入）
+  // 直接加载 .env（补充缺失项）后返回，无需任何交互
+  if (process.env.LANHU_COOKIE) {
+    if (fs.existsSync(envPath)) config({ path: envPath });
+    return {
+      cookie: process.env.LANHU_COOKIE,
+      authorization: process.env.LANHU_AUTHORIZATION,
+      tenantId: process.env.LANHU_TENANT_ID,
+      projectId: process.env.LANHU_PROJECT_ID,
+    };
+  }
 
-    if (hasCookie) {
-      config({ path: envPath });
+  // 第二优先级：项目 .mcp.json（项目级配置，随项目走）
+  const mcpJsonEnv = readMcpJsonConfig();
+  if (mcpJsonEnv) {
+    return {
+      cookie: mcpJsonEnv.LANHU_COOKIE,
+      authorization: mcpJsonEnv.LANHU_AUTHORIZATION,
+      tenantId: mcpJsonEnv.LANHU_TENANT_ID,
+      projectId: mcpJsonEnv.LANHU_PROJECT_ID,
+    };
+  }
 
-      // Cookie 已有但缺少项目 URL → 只问项目
-      if (!hasProject) {
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stderr,
-        });
-        const ask = (q: string) => new Promise<string>((r) => rl.question(q, r));
+  const envExists = fs.existsSync(envPath);
+  const envContent = envExists ? fs.readFileSync(envPath, "utf-8") : "";
+  const envHasCookie = /^LANHU_COOKIE\s*=.+$/m.test(envContent);
+  const claudeHasConfig = hasClaudeConfig();
 
-        console.error("");
-        console.error("蓝湖 MCP Server — 补充项目配置");
-        console.error("");
+  // 两个配置文件都已有有效 Cookie → 直接加载返回
+  if (envHasCookie && claudeHasConfig) {
+    config({ path: envPath });
+    return {
+      cookie: process.env.LANHU_COOKIE || "",
+      authorization: process.env.LANHU_AUTHORIZATION,
+      tenantId: process.env.LANHU_TENANT_ID,
+      projectId: process.env.LANHU_PROJECT_ID,
+    };
+  }
 
-        const projectUrl = await ask(
-          " 请粘贴蓝湖项目 URL（或 projectId，直接回车跳过）: "
-        );
-        rl.close();
+  // 只有 .env 有 Cookie，Claude 配置缺失 → 询问是否补写
+  if (envHasCookie && !claudeHasConfig) {
+    config({ path: envPath });
 
-        let projectId: string | undefined;
-        if (projectUrl.trim()) {
-          projectId = extractProjectId(projectUrl) || undefined;
-          if (projectId) {
-            fs.appendFileSync(envPath, `LANHU_PROJECT_ID=${projectId}\n`, "utf-8");
-            console.error(`已保存项目 ID: ${projectId}`);
-          } else {
-            console.error("无法从 URL 解析 projectId，将使用全项目模式");
-          }
-        }
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stderr,
+    });
+    const ask = (q: string) => new Promise<string>((r) => rl.question(q, r));
 
-        return {
-          cookie: process.env.LANHU_COOKIE || "",
-          authorization: process.env.LANHU_AUTHORIZATION,
-          tenantId: process.env.LANHU_TENANT_ID,
-          projectId,
-        };
-      }
+    console.error("");
+    console.error("蓝湖 MCP Server — 检测到 .env 已配置，但 Claude 配置文件未同步");
+    console.error("");
 
-      // Cookie 和项目都有 → 直接返回
-      return {
+    const choice = await ask(
+      " 是否也写入 ~/.claude/settings.json？(y/N): "
+    );
+    rl.close();
+
+    if (choice.trim().toLowerCase() === "y") {
+      writeClaudeConfig({
         cookie: process.env.LANHU_COOKIE || "",
         authorization: process.env.LANHU_AUTHORIZATION,
         tenantId: process.env.LANHU_TENANT_ID,
         projectId: process.env.LANHU_PROJECT_ID,
-      };
+      });
+      console.error(`已写入 ${CLAUDE_SETTINGS_PATH}`);
     }
+    console.error("");
+
+    return {
+      cookie: process.env.LANHU_COOKIE || "",
+      authorization: process.env.LANHU_AUTHORIZATION,
+      tenantId: process.env.LANHU_TENANT_ID,
+      projectId: process.env.LANHU_PROJECT_ID,
+    };
   }
 
-  // 交互式引导
+  // 只有 Claude 配置存在但 .env 缺失 → 从 Claude 配置回填 .env
+  if (!envHasCookie && claudeHasConfig) {
+    const settings = JSON.parse(fs.readFileSync(CLAUDE_SETTINGS_PATH, "utf-8"));
+    const env = settings.mcpServers["lanhu-mcp"].env as Record<string, string>;
+
+    // 用 Claude 配置写入 .env
+    const envLines: string[] = [
+      "# 蓝湖认证配置（从 Claude settings.json 同步）",
+      `LANHU_COOKIE=${env.LANHU_COOKIE}`,
+    ];
+    if (env.LANHU_AUTHORIZATION) {
+      envLines.push(`LANHU_AUTHORIZATION=${env.LANHU_AUTHORIZATION}`);
+    }
+    if (env.LANHU_TENANT_ID) {
+      envLines.push(`LANHU_TENANT_ID=${env.LANHU_TENANT_ID}`);
+    }
+    if (env.LANHU_PROJECT_ID) {
+      envLines.push(`LANHU_PROJECT_ID=${env.LANHU_PROJECT_ID}`);
+    }
+    fs.writeFileSync(envPath, envLines.join("\n") + "\n", "utf-8");
+    fs.chmodSync(envPath, 0o600);
+
+    return {
+      cookie: env.LANHU_COOKIE,
+      authorization: env.LANHU_AUTHORIZATION,
+      tenantId: env.LANHU_TENANT_ID,
+      projectId: env.LANHU_PROJECT_ID,
+    };
+  }
+
+  // —— 首次配置：两个文件都没有 ——
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stderr,
@@ -127,6 +299,20 @@ async function promptConfig(): Promise<{
   console.error("  Authorization: 复制 Authorization 整行值");
   console.error("  tenantId:      从请求 body 中获取（可选）");
   console.error("  项目 URL:      从浏览器地址栏复制（可选）");
+  console.error("");
+  console.error("请选择配置写入位置：");
+  console.error("  1. .env 文件（本地环境变量，所有工具通用）");
+  console.error("  2. Claude 配置文件（~/.claude/settings.json）");
+  console.error("     等效: claude mcp add lanhu-mcp -e LANHU_COOKIE=... -- npx dc-lanhu-mcp-server");
+  console.error("  3. 两者都写");
+  console.error("");
+
+  const targetChoice = await ask("请选择 (1/2/3，默认 3): ");
+  let target: ConfigTarget;
+  if (targetChoice.trim() === "1") target = "env";
+  else if (targetChoice.trim() === "2") target = "claude";
+  else target = "both";
+
   console.error("");
 
   const cookie = await ask("请输入你的蓝湖 Cookie: ");
@@ -154,34 +340,46 @@ async function promptConfig(): Promise<{
     }
   }
 
-  // 写入 .env 文件，避免下次重复输入
-  const envLines: string[] = [
-    "# 蓝湖认证配置（由首次引导自动生成）",
-    `LANHU_COOKIE=${cookie.trim()}`,
-  ];
-  if (authorization.trim()) {
-    envLines.push(`LANHU_AUTHORIZATION=${authorization.trim()}`);
-  }
-  if (tenantId.trim()) {
-    envLines.push(`LANHU_TENANT_ID=${tenantId.trim()}`);
-  }
-  if (projectId) {
-    envLines.push(`LANHU_PROJECT_ID=${projectId}`);
-  }
-  fs.writeFileSync(envPath, envLines.join("\n") + "\n", "utf-8");
-  fs.chmodSync(envPath, 0o600); // 仅 owner 可读写
-
-  console.error("");
-  console.error(`配置已写入 ${envPath}（权限 600）`);
-  if (projectId) console.error(`  项目 ID: ${projectId}`);
-  console.error("");
-
-  return {
+  const configData = {
     cookie: cookie.trim(),
     authorization: authorization.trim() || undefined,
     tenantId: tenantId.trim() || undefined,
     projectId,
   };
+
+  // 写入 .env
+  if (target === "env" || target === "both") {
+    const envLines: string[] = [
+      "# 蓝湖认证配置（由首次引导自动生成）",
+      `LANHU_COOKIE=${configData.cookie}`,
+    ];
+    if (configData.authorization) {
+      envLines.push(`LANHU_AUTHORIZATION=${configData.authorization}`);
+    }
+    if (configData.tenantId) {
+      envLines.push(`LANHU_TENANT_ID=${configData.tenantId}`);
+    }
+    if (configData.projectId) {
+      envLines.push(`LANHU_PROJECT_ID=${configData.projectId}`);
+    }
+    fs.writeFileSync(envPath, envLines.join("\n") + "\n", "utf-8");
+    fs.chmodSync(envPath, 0o600);
+    console.error("");
+    console.error(`配置已写入 ${envPath}（权限 600）`);
+  }
+
+  // 写入 Claude settings.json
+  if (target === "claude" || target === "both") {
+    writeClaudeConfig(configData);
+    console.error("");
+    console.error(`配置已写入 ${CLAUDE_SETTINGS_PATH}`);
+    console.error("  等效命令: claude mcp add lanhu-mcp -e LANHU_COOKIE=\"...\" -e LANHU_AUTHORIZATION=\"...\" -- npx dc-lanhu-mcp-server");
+  }
+
+  if (configData.projectId) console.error(`  项目 ID: ${configData.projectId}`);
+  console.error("");
+
+  return configData;
 }
 
 /**
@@ -209,7 +407,7 @@ async function main() {
   // 创建 MCP Server
   const server = new McpServer({
     name: "lanhu-mcp-server",
-    version: "1.0.0",
+    version: "1.1.0",
   });
 
   // 注册所有 Tools

@@ -1,11 +1,11 @@
 {
-  "name": "lanhu-mcp-server",
-  "version": "1.0.0",
+  "name": "dc-lanhu-mcp-server",
+  "version": "1.1.0",
   "description": "蓝湖 MCP Server — 让 AI 编程工具直接读取蓝湖设计稿数据，实现 Design to Code",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "lanhu-mcp-server": "dist/index.js"
+    "dc-lanhu-mcp-server": "dist/index.js"
   },
   "files": [
     "dist",
@@ -28,6 +28,14 @@
     "ai"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DC911360/lanhu-mcp-server.git"
+  },
+  "homepage": "https://github.com/DC911360/lanhu-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/DC911360/lanhu-mcp-server/issues"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "axios": "^1.9.0",
