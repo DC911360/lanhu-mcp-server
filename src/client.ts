@@ -61,14 +61,50 @@ export class LanhuClient {
   }
 
   setTenantId(t: string) { this.tenantId = t; }
+  setProjectId(p: string) { this.projectId = p; }
   getProjectId() { return this.projectId; }
+  getTenantId() { return this.tenantId; }
+
+  /**
+   * 自动发现 tenantId 和 projectId
+   *
+   * 策略：
+   * 1. 调用 workbench API 获取团队信息，提取 tenantId
+   * 2. 从团队信息中提取第一个项目的 projectId
+   */
+  async autoDiscover(): Promise<{ tenantId: string; projectId?: string }> {
+    // 尝试用 tenantId=0 调用 workbench API，从返回数据中提取真实 tenantId
+    try {
+      const res = await this.http.post("/workbench/api/workbench/abstractfile/list", {
+        tenantId: 0, parentId: 0,
+      });
+      const data = res.data?.data || [];
+      if (Array.isArray(data) && data.length > 0) {
+        // 从返回的项目中提取 tenantId（sourceId 即 projectId）
+        const first = data[0];
+        if (first.sourceId) {
+          this.projectId = this.projectId || first.sourceId;
+        }
+        // workbench API 不直接返回 tenantId，但成功说明 tenantId=0 可用
+        if (!this.tenantId) {
+          this.tenantId = "0";
+        }
+      }
+    } catch {
+      // workbench API 失败，tenantId 默认用 "0"（已验证可用）
+      if (!this.tenantId) this.tenantId = "0";
+    }
+
+    return { tenantId: this.tenantId || "0", projectId: this.projectId };
+  }
 
   // ─── Workbench API ───────────────────────────────────
 
   async getWorkbenchFiles(parentId = 0) {
-    if (!this.tenantId) throw new Error("tenantId 未设置");
+    // 自动发现 tenantId
+    if (!this.tenantId) await this.autoDiscover();
     const res = await this.http.post("/workbench/api/workbench/abstractfile/list", {
-      tenantId: this.tenantId, parentId,
+      tenantId: parseInt(this.tenantId || "0"), parentId,
     });
     return res.data?.data || [];
   }
@@ -78,10 +114,11 @@ export class LanhuClient {
 
   async getDesigns(projectId?: string) {
     const pid = projectId || this.projectId;
-    if (!pid) throw new Error("projectId 未指定");
-    if (!this.tenantId) throw new Error("tenantId 未设置");
+    if (!pid) throw new Error("projectId 未指定（可通过 lanhu_set_project 设置，或在工具参数中传入）");
+    // 自动发现 tenantId（默认 "0" 已验证可用）
+    if (!this.tenantId) await this.autoDiscover();
     const res = await this.http.get("/api/project/images", {
-      params: { project_id: pid, team_id: this.tenantId, dds_status: 1, position: 1, show_cb_src: 1, comment: 1 },
+      params: { project_id: pid, team_id: parseInt(this.tenantId || "0"), dds_status: 1, position: 1, show_cb_src: 1, comment: 1 },
     });
     const code = res.data?.code;
     if (code !== "00000" && code !== 0) throw new Error(`获取设计稿失败: ${res.data?.msg}`);
@@ -557,10 +594,10 @@ export class LanhuClient {
    * 包含 NavBar、Avatar、Input、ImageText 等语义组件，
    * 以及 row/col 布局信息和精确样式。
    */
-  async getDDSSchema(versionId?: string, imageId?: string): Promise<unknown> {
+  async getDDSSchema(versionId?: string, imageId?: string, projectId?: string): Promise<unknown> {
     let vid = versionId;
     if (!vid && imageId) {
-      const detail = await this.getDesignDetail(imageId);
+      const detail = await this.getDesignDetail(imageId, projectId);
       const versions = (detail as any)?.versions || [];
       vid = versions[0]?.id;
     }

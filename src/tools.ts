@@ -166,6 +166,44 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
     }
   );
 
+  // ── 设置项目（从 URL 自动提取 projectId）★★★ ────────
+
+  server.tool(
+    "lanhu_set_project",
+    "从蓝湖项目 URL 中提取并设置默认 projectId。之后所有工具调用无需再传 projectId。支持格式：完整 URL 或直接粘贴 projectId UUID。",
+    {
+      url: z.string().describe("蓝湖项目 URL 或 projectId UUID。例如：https://lanhuapp.com/web/#/item/project/detailDetach?pid=xxx&project_id=xxx"),
+    },
+    async ({ url }) => {
+      const trimmed = url.trim();
+      let projectId: string | null = null;
+
+      // 尝试从 URL 中提取 project_id 或 pid
+      const projectMatch = trimmed.match(/[?&](?:project_id|pid)=([a-f0-9-]+)/i);
+      if (projectMatch) {
+        projectId = projectMatch[1];
+      } else if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(trimmed)) {
+        // 直接是 UUID
+        projectId = trimmed;
+      } else {
+        // 尝试从 URL 末尾提取
+        const segments = trimmed.split("/");
+        const last = segments[segments.length - 1];
+        if (/^[a-f0-9-]{8,}$/i.test(last)) projectId = last;
+      }
+
+      if (!projectId) {
+        return { content: [{ type: "text", text: `❌ 无法从 URL 中提取 projectId，请检查 URL 格式：\n${trimmed}` }] };
+      }
+
+      client.setProjectId(projectId);
+      // 同时触发自动发现 tenantId
+      await client.autoDiscover();
+
+      return { content: [{ type: "text", text: `✅ 已设置默认项目：\n  projectId: ${projectId}\n  tenantId: ${client.getTenantId() || "0"}\n\n后续工具调用无需再传 projectId。` }] };
+    }
+  );
+
   // ── DDS 语义化 UI 组件树 ★★★ ────────────────────────
 
   server.tool(
@@ -176,7 +214,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       versionId: z.string().optional().describe("版本 ID（不传则自动获取最新版）"),
     },
     async ({ imageId, versionId }) => {
-      const schema = await client.getDDSSchema(versionId, imageId);
+      const schema = await client.getDDSSchema(versionId, imageId, client.getProjectId());
       return { content: [{ type: "text", text: JSON.stringify(schema, null, 2) }] };
     }
   );
@@ -192,7 +230,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       outputPath: z.string().optional().describe("输出目录（不传则返回代码内容）"),
     },
     async ({ imageId, format, outputPath }) => {
-      const schema = await client.getDDSSchema(undefined, imageId) as any;
+      const schema = await client.getDDSSchema(undefined, imageId, client.getProjectId()) as any;
 
       let result;
       if (format === "vue") {
