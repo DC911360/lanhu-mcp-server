@@ -1,6 +1,6 @@
 {
   "name": "dc-lanhu-mcp-server",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "蓝湖 MCP Server — 让 AI 编程工具直接读取蓝湖设计稿数据，实现 Design to Code",
   "type": "module",
   "main": "dist/index.js",
