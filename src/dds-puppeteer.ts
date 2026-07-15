@@ -7,7 +7,7 @@
  * 3. 从 CodeMirror 编辑器提取完整 Vue + CSS 代码
  * 4. 提取所有 CDN 图片 URL 并下载到本地
  * 5. 替换代码中的 CDN URL 为本地相对路径
- * 6. 保存 DesignPage.vue / index.html / style.css + images/
+ * 6. 保存 index.html / index.css / flexible.js / common.css + img/
  */
 import puppeteer from "puppeteer-core";
 import axios from "axios";
@@ -34,7 +34,7 @@ function getChromePath(): string {
       ? [
           `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
           `${process.env["PROGRAMFILES(X86)"]}\\Google\\Chrome\\Application\\chrome.exe`,
-          `${process.env.LOCAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+          `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
         ]
       : [
           "/usr/bin/google-chrome",

@@ -218,6 +218,16 @@ async function promptConfig(): Promise<{
   if (envHasCookie && !claudeHasConfig) {
     config({ path: envPath });
 
+    // 非交互模式（stdio/MCP client）直接返回，不询问
+    if (!process.stdin.isTTY) {
+      return {
+        cookie: process.env.LANHU_COOKIE || "",
+        authorization: process.env.LANHU_AUTHORIZATION,
+        tenantId: process.env.LANHU_TENANT_ID,
+        projectId: process.env.LANHU_PROJECT_ID,
+      };
+    }
+
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stderr,
@@ -382,6 +392,80 @@ async function promptConfig(): Promise<{
   return configData;
 }
 
+// ─── 错误监控 & 日志 ─────────────────────────────────────
+
+const LOG_DIR = path.join(os.homedir(), ".lanhu-mcp");
+const LOG_FILE = path.join(LOG_DIR, "error.log");
+
+/**
+ * 确保日志目录存在
+ */
+function ensureLogDir(): void {
+  if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+  }
+}
+
+/**
+ * 写入错误日志
+ */
+function logError(type: string, error: Error | string, context?: Record<string, unknown>): void {
+  try {
+    ensureLogDir();
+    const timestamp = new Date().toISOString();
+    const message = error instanceof Error ? error.message : error;
+    const stack = error instanceof Error ? error.stack || "" : "";
+    const ctx = context ? `\nContext: ${JSON.stringify(context, null, 2)}` : "";
+    const logEntry = `[${timestamp}] ${type}: ${message}\n${stack}${ctx}\n${"─".repeat(80)}\n`;
+    fs.appendFileSync(LOG_FILE, logEntry, "utf-8");
+  } catch (e) {
+    // 日志写入失败不影响主流程
+    console.error("日志写入失败:", e);
+  }
+}
+
+/**
+ * 设置全局错误捕获
+ */
+function setupErrorHandlers(): void {
+  // 未捕获的异常
+  process.on("uncaughtException", (error) => {
+    logError("UNCAUGHT_EXCEPTION", error, { pid: process.pid });
+    console.error("[FATAL] 未捕获的异常，已记录到", LOG_FILE);
+    console.error(error);
+    process.exit(1);
+  });
+
+  // 未处理的 Promise 拒绝
+  process.on("unhandledRejection", (reason, promise) => {
+    const error = reason instanceof Error ? reason : new Error(String(reason));
+    logError("UNHANDLED_REJECTION", error, { pid: process.pid });
+    console.error("[ERROR] 未处理的 Promise 拒绝，已记录到", LOG_FILE);
+    console.error(error);
+  });
+
+  // 进程退出前记录
+  process.on("exit", (code) => {
+    if (code !== 0) {
+      logError("PROCESS_EXIT", `进程退出，退出码: ${code}`, { pid: process.pid });
+    }
+  });
+
+  // 信号处理（SIGTERM, SIGINT）
+  process.on("SIGTERM", () => {
+    logError("SIGTERM", "收到 SIGTERM 信号，准备退出", { pid: process.pid });
+    process.exit(0);
+  });
+
+  process.on("SIGINT", () => {
+    logError("SIGINT", "收到 SIGINT 信号，准备退出", { pid: process.pid });
+    process.exit(0);
+  });
+}
+
+// 启动错误监控
+setupErrorHandlers();
+
 /**
  * 蓝湖 MCP Server 入口
  *
@@ -391,6 +475,9 @@ async function promptConfig(): Promise<{
  *
  * Claude Code 配置：
  *   claude mcp add lanhu-mcp -- node dist/index.js
+ *
+ * 错误日志：
+ *   ~/.lanhu-mcp/error.log
  */
 async function main() {
   // 启动前交互式配置
@@ -407,7 +494,7 @@ async function main() {
   // 创建 MCP Server
   const server = new McpServer({
     name: "lanhu-mcp-server",
-    version: "1.1.0",
+    version: "1.2.0",
   });
 
   // 注册所有 Tools

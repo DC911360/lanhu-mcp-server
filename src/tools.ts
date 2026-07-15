@@ -5,6 +5,53 @@ import { generateVueCode, generateHTMLCode } from "./dds-codegen.js";
 import { downloadDesign } from "./dds-puppeteer.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
+
+// ─── 错误日志工具 ────────────────────────────────────────
+
+const LOG_DIR = path.join(os.homedir(), ".lanhu-mcp");
+const LOG_FILE = path.join(LOG_DIR, "error.log");
+
+function ensureLogDir(): void {
+  if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+  }
+}
+
+function logToolError(toolName: string, error: Error | string, args?: Record<string, unknown>): void {
+  try {
+    ensureLogDir();
+    const timestamp = new Date().toISOString();
+    const message = error instanceof Error ? error.message : error;
+    const stack = error instanceof Error ? error.stack || "" : "";
+    const argsStr = args ? `\nArgs: ${JSON.stringify(args, null, 2)}` : "";
+    const logEntry = `[${timestamp}] TOOL_ERROR [${toolName}]: ${message}\n${stack}${argsStr}\n${"─".repeat(80)}\n`;
+    fs.appendFileSync(LOG_FILE, logEntry, "utf-8");
+  } catch (e) {
+    console.error("日志写入失败:", e);
+  }
+}
+
+/**
+ * 包装 tool handler，自动捕获错误并记录日志
+ */
+function withErrorLogging<T extends Record<string, unknown>>(
+  toolName: string,
+  handler: (args: T) => Promise<{ content: Array<{ type: "text"; text: string }> }>
+): (args: T) => Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+  return async (args: T) => {
+    try {
+      return await handler(args);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logToolError(toolName, err, args);
+      return {
+        content: [{ type: "text" as const, text: `❌ ${toolName} 执行失败: ${err.message}` }],
+        isError: true,
+      };
+    }
+  };
+}
 
 /**
  * 注册所有蓝湖 MCP Tools
@@ -24,12 +71,12 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       imageId: z.string().describe("设计稿 image_id"),
       projectId: z.string().optional().describe("项目 UUID"),
     },
-    async ({ imageId, projectId }) => {
+    withErrorLogging("lanhu_get_design_document", async ({ imageId, projectId }) => {
       const doc = await client.getDesignDocument(imageId, projectId);
       return {
         content: [{ type: "text", text: JSON.stringify(doc, null, 2) }],
       };
-    }
+    })
   );
 
   // ─── 项目/文件夹 ──────────────────────────────────────
@@ -257,13 +304,13 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
 
   server.tool(
     "lanhu_download_design",
-    "一键下载蓝湖设计稿：获取 DDS 官方生成的 Vue/CSS 代码 + 下载所有切图 + 替换为本地路径。输出 DesignPage.vue / index.html / style.css + images/。",
+    "一键下载蓝湖设计稿：通过 Puppeteer 从 DDS 页面提取官方生成的 HTML/CSS 代码 + 下载所有 CDN 切图并替换为本地路径。输出 index.html / index.css / flexible.js / common.css + img/。",
     {
       imageId: z.string().describe("设计稿 image_id（从蓝湖 URL 中获取）"),
       outputPath: z.string().describe("输出目录路径（如 ~/Desktop/my-design）"),
       projectId: z.string().optional().describe("项目 UUID（不传则使用默认配置）"),
     },
-    async ({ imageId, outputPath, projectId }) => {
+    withErrorLogging("lanhu_download_design", async ({ imageId, outputPath, projectId }) => {
       const pid = projectId || client.getProjectId();
       if (!pid) throw new Error("请提供 projectId 或配置默认项目");
 
@@ -287,7 +334,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
           ].join("\n"),
         }],
       };
-    }
+    })
   );
 
   // ─ 下载 ─────────────────────────────────────────────

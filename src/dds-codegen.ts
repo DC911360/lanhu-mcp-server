@@ -36,7 +36,7 @@ export function generateVueCode(schema: DDSNode, options?: { projectName?: strin
 </script>`;
 
   // 生成 style
-  const style = `<style lang="scss" scoped>
+  const style = `<style scoped>
 .page {
   width: ${schema.style?.width || 375}px;
   min-height: ${schema.style?.height || 892}px;

@@ -8,7 +8,7 @@
 - **精确设计数据** — 获取完整图层树（@1x 绝对坐标、全量样式 fill/border/shadow/typography）
 - **DDS 语义化组件树** — 获取蓝湖 AI 识别的 UI 组件结构（NavBar / Avatar / Input / ImageText 等），包含 row/col 布局和精确样式
 - **代码生成** — 基于 DDS 语义数据生成 Vue 3 SFC 或纯 HTML 代码
-- **一键下载** — 通过 Puppeteer 提取 DDS 官方生成的 Vue/CSS 代码 + 下载所有切图 + 替换为本地路径
+- **一键下载** — 通过 Puppeteer 从 DDS 页面提取官方 HTML/CSS 代码 + 下载所有切图并替换为本地路径
 - **Design Tokens** — 自动提取颜色、字体、间距、圆角等设计变量
 - **资源下载** — 封面图、切图、导出图片下载
 
@@ -23,6 +23,113 @@ npm install -g dc-lanhu-mcp-server
 ```bash
 npx dc-lanhu-mcp-server
 ```
+
+## 30 秒接入指南
+
+全局安装后，按你使用的 AI 编程工具复制对应配置即可：
+
+### Claude Code（CLI）
+
+```bash
+claude mcp add lanhu-mcp \
+  -e LANHU_COOKIE="你的cookie" \
+  -e LANHU_AUTHORIZATION="你的token" \
+  -- dc-lanhu-mcp-server
+```
+
+### Cursor
+
+在项目根目录创建 `.cursor/mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "lanhu-mcp": {
+      "command": "dc-lanhu-mcp-server",
+      "env": {
+        "LANHU_COOKIE": "你的cookie",
+        "LANHU_AUTHORIZATION": "你的token"
+      }
+    }
+  }
+}
+```
+
+### Codex（OpenAI）
+
+```bash
+codex mcp add lanhu-mcp \
+  -e LANHU_COOKIE="你的cookie" \
+  -e LANHU_AUTHORIZATION="你的token" \
+  -- dc-lanhu-mcp-server
+```
+
+### Windsurf
+
+在 `~/.codeium/windsurf/mcp_config.json` 添加：
+
+```json
+{
+  "mcpServers": {
+    "lanhu-mcp": {
+      "command": "dc-lanhu-mcp-server",
+      "env": {
+        "LANHU_COOKIE": "你的cookie",
+        "LANHU_AUTHORIZATION": "你的token"
+      }
+    }
+  }
+}
+```
+
+### VSCode Copilot Chat
+
+在项目 `.vscode/mcp.json` 添加：
+
+```json
+{
+  "servers": {
+    "lanhu-mcp": {
+      "command": "dc-lanhu-mcp-server",
+      "env": {
+        "LANHU_COOKIE": "你的cookie",
+        "LANHU_AUTHORIZATION": "你的token"
+      }
+    }
+  }
+}
+```
+
+### Cline（VSCode 扩展）
+
+在 VSCode `settings.json` 添加：
+
+```json
+{
+  "cline.mcpServers": {
+    "lanhu-mcp": {
+      "command": "dc-lanhu-mcp-server",
+      "env": {
+        "LANHU_COOKIE": "你的cookie",
+        "LANHU_AUTHORIZATION": "你的token"
+      }
+    }
+  }
+}
+```
+
+### Cherry Studio / 其他 GUI 客户端
+
+设置 → MCP Servers → 添加：
+- **Type**: `stdio`
+- **Command**: `dc-lanhu-mcp-server`
+- **Env**: `LANHU_COOKIE=xxx`, `LANHU_AUTHORIZATION=xxx`
+
+### 验证接入
+
+在任意 agent 中输入："**列出我的蓝湖项目**" → 返回项目列表即接入成功 ✅
+
+---
 
 ## 配置方式
 
@@ -316,6 +423,67 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 # 使用 tsx 直接运行，改代码无需重新构建
 npx @modelcontextprotocol/inspector npx tsx src/index.ts
 ```
+
+## 错误日志
+
+Server 会自动捕获所有异常并记录到日志文件，方便排查问题。
+
+**日志位置：**
+
+```
+~/.lanhu-mcp/error.log
+```
+
+**监控内容：**
+
+- `TOOL_ERROR` — Tool 调用失败（含工具名、参数、完整堆栈）
+- `UNCAUGHT_EXCEPTION` — 未捕获异常
+- `UNHANDLED_REJECTION` — 未处理的 Promise 拒绝
+- `SIGTERM` / `SIGINT` — 进程退出信号
+
+**常用命令：**
+
+```bash
+# 实时查看（推荐，调试时开一个终端窗口常驻）
+tail -f ~/.lanhu-mcp/error.log
+
+# 查看全部内容
+cat ~/.lanhu-mcp/error.log
+
+# 只看最后 50 行
+tail -50 ~/.lanhu-mcp/error.log
+
+# 分页查看（按 q 退出，/ 搜索）
+less ~/.lanhu-mcp/error.log
+
+# 只查某个工具的错误
+grep "lanhu_download_design" ~/.lanhu-mcp/error.log
+
+# 统计错误次数
+grep -c "TOOL_ERROR" ~/.lanhu-mcp/error.log
+
+# 清空日志
+> ~/.lanhu-mcp/error.log
+
+# 用编辑器打开
+code ~/.lanhu-mcp/error.log   # VSCode / Cursor
+```
+
+**日志格式：**
+
+```
+[2026-07-15T02:02:50.582Z] TOOL_ERROR [lanhu_get_design_document]: 获取详情失败: Image not exist
+Error: 获取详情失败: Image not exist
+    at LanhuClient.getDesignDetail (...)
+    at ...
+Args: {
+  "imageId": "invalid-image-id-12345",
+  "projectId": "b27d22f6-..."
+}
+────────────────────────────────────────────────────────────────────────────────
+```
+
+每条日志包含：时间戳 / 类型 / 工具名 / 错误信息 / 调用堆栈 / 调用参数。
 
 ## 项目结构
 

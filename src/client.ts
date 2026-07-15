@@ -108,7 +108,6 @@ export class LanhuClient {
     });
     return res.data?.data || [];
   }
-  async getProjects() { return this.getWorkbenchFiles(0); }
 
   // ─── Project API ─────────────────────────────────────
 
@@ -483,6 +482,14 @@ export class LanhuClient {
     const radiusSet = new Set<number>();
 
     const walk = (ls: DesignLayer[]) => {
+      // 计算同父级下相邻兄弟元素之间的真实垂直间距
+      const siblings = [...ls].filter(l => l.rect.height > 0)
+        .sort((a, b) => a.rect.y - b.rect.y);
+      for (let i = 1; i < siblings.length; i++) {
+        const gap = Math.round(siblings[i].rect.y - (siblings[i - 1].rect.y + siblings[i - 1].rect.height));
+        if (gap > 0 && gap < 200) spacingSet.add(gap); // 过滤异常值
+      }
+
       for (const l of ls) {
         for (const fill of l.style.fills) {
           if (fill.color) { const k = fill.color.value; if (!colorMap.has(k)) colorMap.set(k, fill.color); }
@@ -491,7 +498,6 @@ export class LanhuClient {
           const t = l.style.typography;
           fontSet.add(`${t.fontFamily}|${t.fontSize}|${t.fontWeight}`);
         }
-        if (l.rect.y > 0) spacingSet.add(Math.round(l.rect.y));
         for (const b of l.style.borders) { if (b.radius > 0) radiusSet.add(Math.round(b.radius)); }
         walk(l.children);
       }
@@ -577,17 +583,6 @@ export class LanhuClient {
   }
 
   /**
-   * 下载图层导出图片（ddsImage / image）
-   */
-  async downloadLayerImage(layer: DesignLayer, outputPath: string): Promise<string | null> {
-    if (!layer.imageUrl) return null;
-    const ext = layer.imageUrl.includes('.svg') ? 'svg' : 'png';
-    const safeName = layer.name.replace(/[^a-zA-Z0-9一-龥_-]/g, '_').substring(0, 50);
-    const fileName = `${safeName}.${ext}`;
-    return this.downloadSlice(layer.imageUrl, fileName, outputPath);
-  }
-
-  /**
    * 获取蓝湖 DDS 语义化 UI 组件树
    *
    * 调用 dds.lanhuapp.com API，返回经过 AI 识别的 UI 组件结构，
@@ -631,29 +626,5 @@ export class LanhuClient {
     });
 
     return typeof schemaRes.data === "string" ? JSON.parse(schemaRes.data) : schemaRes.data;
-  }
-
-  /**
-   * 批量下载设计稿中所有导出图片
-   */
-  async downloadAllImages(imageId: string, outputPath: string, projectId?: string): Promise<Array<{ name: string; path: string; url: string }>> {
-    const doc = await this.getDesignDocument(imageId, projectId);
-    const dir = path.resolve(outputPath);
-    fs.mkdirSync(dir, { recursive: true });
-
-    const results: Array<{ name: string; path: string; url: string }> = [];
-    const allLayers: DesignLayer[] = [];
-    const walk = (ls: DesignLayer[]) => { for (const l of ls) { allLayers.push(l); walk(l.children); } };
-    walk(doc.layers);
-
-    for (const layer of allLayers) {
-      if (layer.imageUrl) {
-        const filePath = await this.downloadLayerImage(layer, dir);
-        if (filePath) {
-          results.push({ name: layer.name, path: filePath, url: layer.imageUrl });
-        }
-      }
-    }
-    return results;
   }
 }
