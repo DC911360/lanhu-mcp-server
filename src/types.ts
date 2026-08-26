@@ -136,7 +136,7 @@ export interface DesignLayer {
     exportFormats: string[];
   };
 
-  raw: Record<string, unknown>;
+  raw?: Record<string, unknown>;
 }
 
 /** 图层类型 */

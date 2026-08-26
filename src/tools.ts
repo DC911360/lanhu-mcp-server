@@ -66,15 +66,39 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
 
   server.tool(
     "lanhu_get_design_document",
-    "获取设计稿的完整精确结构化数据。返回图层树（绝对坐标@1x、全量样式fill/border/shadow/typography）、Design Tokens。供 iOS/Android/Flutter/Web/H5 代码生成器使用。",
+    "获取设计稿的结构化数据。返回图层树摘要（图层名、坐标、尺寸、类型）+ Design Tokens。默认只展开 2 层，按需调用 lanhu_get_layer_detail 获取子图层完整样式。",
     {
       imageId: z.string().describe("设计稿 image_id"),
       projectId: z.string().optional().describe("项目 UUID"),
+      depth: z.number().default(2).describe("展开深度（默认 2），设为 99 可获取全部图层"),
+      includeStyles: z.boolean().default(true).describe("是否包含样式数据（fill/border/shadow/typography）"),
+      includeRaw: z.boolean().default(false).describe("是否包含原始 raw 数据（体积大，默认 false）"),
     },
-    withErrorLogging("lanhu_get_design_document", async ({ imageId, projectId }) => {
-      const doc = await client.getDesignDocument(imageId, projectId);
+    withErrorLogging("lanhu_get_design_document", async ({ imageId, projectId, depth, includeStyles, includeRaw }) => {
+      const doc = await client.getDesignDocument(imageId, projectId, { depth, includeStyles, includeRaw });
       return {
         content: [{ type: "text", text: JSON.stringify(doc, null, 2) }],
+      };
+    })
+  );
+
+  // ─── ★★★ 按需获取子图层详情 ★★★ ────────────────────
+
+  server.tool(
+    "lanhu_get_layer_detail",
+    "获取单个图层的完整详情（含全量样式和原始数据）。先用 lanhu_get_design_document 查看图层结构，再用此工具按需获取具体图层的详细信息。",
+    {
+      imageId: z.string().describe("设计稿 image_id"),
+      layerId: z.string().describe("图层 ID（从 lanhu_get_design_document 的返回结果中获取）"),
+      projectId: z.string().optional().describe("项目 UUID"),
+    },
+    withErrorLogging("lanhu_get_layer_detail", async ({ imageId, layerId, projectId }) => {
+      const layer = await client.getLayerDetail(imageId, layerId, projectId);
+      if (!layer) {
+        return { content: [{ type: "text", text: `❌ 未找到图层: ${layerId}` }] };
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(layer, null, 2) }],
       };
     })
   );
@@ -137,23 +161,26 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
     }
   );
 
-  // ─── 标注/图层 ────────────────────────────────────────
+  // ── 标注/图层 ───────────────────────────────────────
 
   server.tool(
     "lanhu_get_annotations",
-    "获取设计稿的标注数据（图层树），包含每个元素的尺寸、位置、颜色、字体等精确参数。",
+    "获取设计稿的标注数据（图层列表），包含每个元素的尺寸、位置、颜色、字体等参数。支持按图层名过滤，默认只返回关键样式摘要。",
     {
       imageId: z.string().describe("设计稿 image_id"),
       projectId: z.string().optional().describe("项目 UUID"),
+      filter: z.string().optional().describe("按图层名过滤（模糊匹配，如 Button 或 Icon）"),
+      includeStyles: z.boolean().default(true).describe("是否包含样式数据"),
     },
-    async ({ imageId, projectId }) => {
-      const annotations = await client.getAnnotations(imageId, projectId);
+    async ({ imageId, projectId, filter, includeStyles }) => {
+      const annotations = await client.getAnnotations(imageId, projectId, { filter, includeStyles });
+      if (!annotations.length) {
+        return { content: [{ type: "text", text: `无标注数据${filter ? `（匹配 "${filter}"）` : ""}` }] };
+      }
       return {
         content: [{
           type: "text",
-          text: annotations.length
-            ? `共 ${annotations.length} 个标注元素：\n${JSON.stringify(annotations, null, 2)}`
-            : "无标注数据",
+          text: `共 ${annotations.length} 个标注元素：\n${JSON.stringify(annotations, null, 2)}`,
         }],
       };
     }

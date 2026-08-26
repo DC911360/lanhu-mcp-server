@@ -81,9 +81,11 @@ export async function downloadDesign(
     headers: { Cookie: cookie },
     timeout: 15000,
   });
-  const versions = detailRes.data?.result?.versions || [];
+  console.error("[DEBUG] detailRes.data:", JSON.stringify(detailRes.data));
+  const detail = detailRes.data?.result || detailRes.data?.data || {};
+  const versions = detail?.versions || [];
   const versionId = versions[0]?.id;
-  if (!versionId) throw new Error("无法获取 version_id");
+  if (!versionId) throw new Error(`无法获取 version_id，API返回: ${JSON.stringify(detailRes.data)}`);
 
   // ─── Step 2-3: Puppeteer 提取 CodeMirror 完整代码 ──────
   const browser = await puppeteer.launch({

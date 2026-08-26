@@ -138,7 +138,19 @@ export class LanhuClient {
   //  ★★★ 精确图层树解析 ★★★
   // ═══════════════════════════════════════════════════
 
-  async getDesignDocument(imageId: string, projectId?: string): Promise<DesignDocument> {
+  /** 设计文档解析选项 */
+  getDesignDocumentOptions = {
+    depth: 2,           // 默认只展开 2 层
+    includeStyles: true, // 默认包含样式
+    includeRaw: false,   // 默认不包含 raw 原始数据
+  };
+
+  async getDesignDocument(
+    imageId: string,
+    projectId?: string,
+    options?: Partial<typeof this.getDesignDocumentOptions>
+  ): Promise<DesignDocument> {
+    const opts = { ...this.getDesignDocumentOptions, ...options };
     const detail = await this.getDesignDetail(imageId, projectId);
     const versions = (detail as any)?.versions || [];
     const latestVersion = versions[0];
@@ -150,7 +162,7 @@ export class LanhuClient {
     const scale = raw.ArtboardScale || 2;
     const info = raw.info || [];
 
-    const flatLayers = info.map((ab: any) => this._parseArtboard(ab, scale, null, 0));
+    const flatLayers = info.map((ab: any) => this._parseArtboard(ab, scale, null, 0, opts));
     const layers = this._rebuildHierarchy(flatLayers);
     const tokens = this._extractTokens(layers);
 
@@ -169,7 +181,25 @@ export class LanhuClient {
     };
   }
 
-  private _parseArtboard(ab: any, scale: number, parentId: string | null, depth: number): DesignLayer {
+  /**
+   * 获取单个图层的完整详情（含样式和原始数据）
+   * 用于按需获取子图层的详细信息，避免一次性返回全量数据
+   */
+  async getLayerDetail(imageId: string, layerId: string, projectId?: string): Promise<DesignLayer | null> {
+    const doc = await this.getDesignDocument(imageId, projectId, { depth: 99, includeStyles: true, includeRaw: true });
+    const findLayer = (layers: DesignLayer[]): DesignLayer | null => {
+      for (const l of layers) {
+        if (l.id === layerId) return l;
+        const found = findLayer(l.children);
+        if (found) return found;
+      }
+      return null;
+    };
+    return findLayer(doc.layers);
+  }
+
+  private _parseArtboard(ab: any, scale: number, parentId: string | null, depth: number, opts?: Partial<typeof this.getDesignDocumentOptions>): DesignLayer {
+    const o = { ...this.getDesignDocumentOptions, ...opts };
     // 提取 artboard 级别的导出图片
     const abDdsImg = ab.ddsImage || ab.image;
     const abImageUrl = abDdsImg?.imageUrl || undefined;
@@ -185,25 +215,27 @@ export class LanhuClient {
         width: this._round(ab.width || 0),
         height: this._round(ab.height || 0),
       },
-      style: this._parseStyle(ab, scale),
+      style: o.includeStyles ? this._parseStyle(ab, scale) : {} as any,
       imageUrl: abImageUrl,
       imageSize: abImgSize,
-      children: (ab.layers || []).map((c: any) =>
+      children: depth < o.depth ? (ab.layers || []).map((c: any) =>
         this._parseLayer(c, scale, ab.id || null, depth + 1,
           this._to1x(ab.position_x ?? ab.left ?? 0, scale),
-          this._to1x(ab.position_y ?? ab.top ?? 0, scale)
+          this._to1x(ab.position_y ?? ab.top ?? 0, scale),
+          o
         )
-      ),
+      ) : [],
       metadata: {
         depth, parentId,
         hasExportImage: !!ab.hasExportDDSImage,
         exportFormats: this._getExportFormats(ab),
       },
-      raw: ab,
+      ...(o.includeRaw ? { raw: ab } : {}),
     };
   }
 
-  private _parseLayer(layer: any, scale: number, parentId: string | null, depth: number, pAbsX: number, pAbsY: number): DesignLayer {
+  private _parseLayer(layer: any, scale: number, parentId: string | null, depth: number, pAbsX: number, pAbsY: number, opts?: Partial<typeof this.getDesignDocumentOptions>): DesignLayer {
+    const o = { ...this.getDesignDocumentOptions, ...opts };
     const relX = this._to1x(layer.left ?? layer.position_x ?? 0, scale);
     const relY = this._to1x(layer.top ?? layer.position_y ?? 0, scale);
     const absX = pAbsX + relX;
@@ -214,9 +246,9 @@ export class LanhuClient {
     const imageUrl = ddsImg?.imageUrl || undefined;
     const imgSize = ddsImg?.size ? { width: ddsImg.size.width || 0, height: ddsImg.size.height || 0 } : undefined;
 
-    const children = (layer.layers || []).map((c: any) =>
-      this._parseLayer(c, scale, layer.id || null, depth + 1, absX, absY)
-    );
+    const children = depth < o.depth ? (layer.layers || []).map((c: any) =>
+      this._parseLayer(c, scale, layer.id || null, depth + 1, absX, absY, o)
+    ) : [];
 
     return {
       id: layer.id || "",
@@ -228,7 +260,7 @@ export class LanhuClient {
         width: this._round(this._to1x(layer.width || 0, scale)),
         height: this._round(this._to1x(layer.height || 0, scale)),
       },
-      style: this._parseStyle(layer, scale),
+      style: o.includeStyles ? this._parseStyle(layer, scale) : {} as any,
       imageUrl,
       imageSize: imgSize,
       children,
@@ -237,7 +269,7 @@ export class LanhuClient {
         hasExportImage: !!layer.hasExportDDSImage,
         exportFormats: this._getExportFormats(layer),
       },
-      raw: layer,
+      ...(o.includeRaw ? { raw: layer } : {}),
     };
   }
 
@@ -516,25 +548,47 @@ export class LanhuClient {
   //  向后兼容
   // ═══════════════════════════════════════════════════
 
-  async getAnnotations(imageId: string, projectId?: string) {
-    const doc = await this.getDesignDocument(imageId, projectId);
+  async getAnnotations(
+    imageId: string,
+    projectId?: string,
+    options?: { filter?: string; includeStyles?: boolean }
+  ) {
+    const { filter, includeStyles = true } = options || {};
+    const doc = await this.getDesignDocument(imageId, projectId, {
+      depth: 99,
+      includeStyles: true,  // 始终获取样式用于过滤和返回
+      includeRaw: false,
+    });
     const flat: any[] = [];
+    const filterLower = filter?.toLowerCase();
     const walk = (ls: DesignLayer[]) => {
       for (const l of ls) {
-        flat.push({
+        // 过滤：按图层名模糊匹配
+        if (filterLower && !l.name.toLowerCase().includes(filterLower)) {
+          walk(l.children);
+          continue;
+        }
+        const entry: any = {
           layer_id: l.id, name: l.name, type: l.type,
           width: l.rect.width, height: l.rect.height,
           x: l.rect.x, y: l.rect.y,
-          styles: {
-            color: l.style.fills[0]?.color?.value,
-            background_color: l.style.fills[0]?.color?.value,
+        };
+        if (includeStyles) {
+          entry.styles = {
+            color: l.style.fills?.[0]?.color?.value,
+            background_color: l.style.fills?.[0]?.color?.value,
             font_size: l.style.typography?.fontSize,
             font_weight: l.style.typography?.fontWeight,
             opacity: l.style.opacity,
-            border_radius: l.style.borders[0]?.radius,
-          },
-          text: l.style.typography?.text,
-        });
+            border_radius: l.style.borders?.[0]?.radius,
+          };
+          entry.text = l.style.typography?.text;
+        }
+        // 有子图层时标注数量
+        if (l.children.length > 0) {
+          entry.children_count = l.children.length;
+        }
+        flat.push(entry);
         walk(l.children);
       }
     };
