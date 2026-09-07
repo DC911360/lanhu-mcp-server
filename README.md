@@ -131,6 +131,18 @@ codex mcp add lanhu-mcp \
 
 ---
 
+## ⚠️ 安全须知
+
+> **重要**：`LANHU_COOKIE` 和 `LANHU_AUTHORIZATION` 是你的蓝湖账号凭证，等同于密码。
+
+- `.env` 文件已自动设置 `chmod 600`（仅文件所有者可读写）
+- **务必** 将 `.env` 和 `.mcp.json` 加入 `.gitignore`，**切勿**提交到代码仓库
+- 若凭证泄露，请立即在蓝湖网页端退出登录使 Cookie 失效
+- Docker 环境下请通过环境变量注入凭证，不要挂载含凭证的配置文件到镜像中
+- Puppeteer 默认启用沙箱保护；如需在 Docker 中关闭，设置 `LANHU_PUPPETEER_NO_SANDBOX=1`
+
+---
+
 ## 配置方式
 
 > **只需 2 个字段**：`LANHU_COOKIE` + `LANHU_AUTHORIZATION`。

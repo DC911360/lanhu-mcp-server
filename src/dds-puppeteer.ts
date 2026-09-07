@@ -9,10 +9,29 @@
  * 5. 替换代码中的 CDN URL 为本地相对路径
  * 6. 保存 index.html / index.css / flexible.js / common.css + img/
  */
-import puppeteer from "puppeteer-core";
 import axios from "axios";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { CONFIG } from "./config.js";
+import { assertValidId } from "./utils/validate.js";
+
+/**
+ * 懒加载 puppeteer-core（可选依赖，约 40MB）
+ *
+ * 只有 lanhu_download_design 需要 Puppeteer，
+ * 其他 13 个工具不需要安装它。
+ */
+async function loadPuppeteer() {
+  try {
+    const mod = await import("puppeteer-core");
+    return mod.default;
+  } catch {
+    throw new Error(
+      "puppeteer-core 未安装。lanhu_download_design 需要此依赖。\n" +
+      "请运行: npm install puppeteer-core"
+    );
+  }
+}
 
 /**
  * Chrome 可执行文件路径
@@ -71,6 +90,8 @@ export async function downloadDesign(
   authorization: string,
   outputPath: string
 ): Promise<DownloadResult> {
+  assertValidId(imageId, "imageId");
+  assertValidId(projectId, "projectId");
   const outputDir = path.resolve(outputPath);
   const imgDir = path.join(outputDir, "img");
   fs.mkdirSync(imgDir, { recursive: true });
@@ -79,19 +100,25 @@ export async function downloadDesign(
   const detailRes = await axios.get("https://lanhuapp.com/api/project/image", {
     params: { pid: projectId, image_id: imageId },
     headers: { Cookie: cookie },
-    timeout: 15000,
+    timeout: CONFIG.apiTimeout,
   });
-  console.error("[DEBUG] detailRes.data:", JSON.stringify(detailRes.data));
+  if (process.env.LANHU_DEBUG) {
+    console.error("[DEBUG] detailRes.data:", JSON.stringify(detailRes.data));
+  }
   const detail = detailRes.data?.result || detailRes.data?.data || {};
   const versions = detail?.versions || [];
   const versionId = versions[0]?.id;
   if (!versionId) throw new Error(`无法获取 version_id，API返回: ${JSON.stringify(detailRes.data)}`);
 
   // ─── Step 2-3: Puppeteer 提取 CodeMirror 完整代码 ──────
+  // 沙箱默认启用；仅在 Docker 或显式设置 LANHU_PUPPETEER_NO_SANDBOX=1 时关闭
+  const noSandbox = process.env.LANHU_PUPPETEER_NO_SANDBOX === "1"
+    || process.env.DOCKER === "true";
+  const puppeteer = await loadPuppeteer();
   const browser = await puppeteer.launch({
     executablePath: getChromePath(),
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: noSandbox ? ["--no-sandbox", "--disable-setuid-sandbox"] : [],
   });
 
   try {
@@ -118,40 +145,98 @@ export async function downloadDesign(
     // 导航到 DDS 页面
     await page.goto(`https://dds.lanhuapp.com/#/?version_id=${versionId}`, {
       waitUntil: "domcontentloaded",
-      timeout: 20000,
+      timeout: CONFIG.puppeteerTimeout,
     });
 
-    // 等待代码生成完成
-    await new Promise((r) => setTimeout(r, 8000));
+    // 等待 CodeMirror 编辑器加载完成（代码生成就绪）
+    await page.waitForSelector(".CodeMirror", { timeout: CONFIG.codeMirrorWaitTimeout });
+    // 轮询等待 CodeMirror 有实际内容（DDS 页面代码异步加载）
+    let codeReady = false;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      codeReady = await page.evaluate(() => {
+        const cms = document.querySelectorAll(".CodeMirror");
+        return [...cms].some(el => {
+          const cm = (el as any).CodeMirror;
+          return cm && cm.getValue?.()?.length > 0;
+        });
+      });
+      if (codeReady) break;
+      if (process.env.LANHU_DEBUG) console.error(`[DEBUG] CodeMirror 内容等待 ${attempt + 1}/20...`);
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    if (!codeReady && process.env.LANHU_DEBUG) {
+      console.error("[DEBUG] CodeMirror 内容轮询结束，仍为空，继续尝试提取");
+    }
 
-    // 切换到 HTML 格式（H5）
+    // 切换到 HTML 格式（H5）— 使用精确选择器代替 querySelectorAll("*")
     await page.evaluate(() => {
-      const htmlBtn = [...document.querySelectorAll("*")].find(
-        (el) => el.textContent?.trim() === "HTML" && el.className?.includes("el-cascader")
-      );
-      if (htmlBtn) (htmlBtn as HTMLElement).click();
+      const candidates = document.querySelectorAll(".el-cascader");
+      for (const el of candidates) {
+        if (el.textContent?.trim() === "HTML") {
+          (el as HTMLElement).click();
+          break;
+        }
+      }
     });
-    await new Promise((r) => setTimeout(r, 3000));
+    // 等待切换后 CodeMirror 重新渲染为 HTML 模式（增加超时，失败不阻塞）
+    try {
+      await page.waitForFunction(
+        () => {
+          const cms = document.querySelectorAll(".CodeMirror");
+          return [...cms].some((el) => {
+            const cm = (el as any).CodeMirror;
+            return cm && (cm.getMode?.().name === "htmlmixed" || cm.getValue?.()?.includes("<!DOCTYPE"));
+          });
+        },
+        { timeout: CONFIG.modeSwitchTimeout * 2 },
+      );
+    } catch {
+      if (process.env.LANHU_DEBUG) console.error("[DEBUG] HTML 模式切换超时，尝试提取当前代码");
+    }
 
     // 从 CodeMirror 实例提取完整代码（HTML + CSS）
-    const { htmlCode, cssCode } = await page.evaluate(() => {
+    const { htmlCode, cssCode, debugInfo } = await page.evaluate(() => {
       let html = "";
       let css = "";
       const cmElements = document.querySelectorAll(".CodeMirror");
-      cmElements.forEach((cmEl) => {
+      const debug: string[] = [];
+      cmElements.forEach((cmEl, i) => {
         const cm = (cmEl as any).CodeMirror;
         if (cm) {
           const content = cm.getValue();
-          const mode = cm.getMode?.().name || "";
-          if (mode === "htmlmixed" || content.includes("<!DOCTYPE")) html = content;
-          if (mode === "css" || content.includes(".page")) css = content;
+          const mode = cm.getMode?.().name || "unknown";
+          debug.push(`CM[${i}] mode=${mode} len=${content.length} preview=${content.slice(0, 100)}`);
+          // 严格过滤：只接受真正的 HTML 设计代码（非页面 UI 的 SVG/图标）
+          const looksLikeDesign = content.includes("<!DOCTYPE") || content.includes("<html") || content.includes("<div class=\"page\"") || content.includes("<div class=\"container\"") || content.includes("<div class=\"artboard\"");
+          if (mode === "htmlmixed" || mode === "html") {
+            html = content;
+          } else if (looksLikeDesign && content.length > 200) {
+            html = content;
+          }
+          // CSS 过滤：排除极短内容
+          if (mode === "css" && content.length > 50) {
+            css = content;
+          } else if (content.includes(".page") || content.includes("body {") || content.includes("flex")) {
+            if (content.length > 50) css = content;
+          }
+        } else {
+          debug.push(`CM[${i}] no CodeMirror instance`);
         }
       });
-      return { htmlCode: html, cssCode: css };
+      debug.push(`total CM elements: ${cmElements.length}`);
+      return { htmlCode: html, cssCode: css, debugInfo: debug.join("\n") };
     });
 
+    if (process.env.LANHU_DEBUG) {
+      console.error("[DEBUG] CodeMirror extraction:", debugInfo);
+    }
+
     if (!htmlCode && !cssCode) {
-      throw new Error("未能从 DDS 页面提取代码");
+      throw new Error(
+        `未能从 DDS 页面提取代码。` +
+        `可能原因：该设计稿是设计集（type=set）或没有开启 D2C 代码生成。\n` +
+        `Debug: ${debugInfo}`
+      );
     }
 
     // ─── Step 4: 提取并下载所有 CDN 图片 ────────────────
@@ -169,7 +254,7 @@ export async function downloadDesign(
       try {
         const res = await axios.get(url, {
           responseType: "arraybuffer",
-          timeout: 10000,
+          timeout: CONFIG.imageDownloadTimeout,
         });
         const name = `img_${imgIdx++}.png`;
         fs.writeFileSync(path.join(imgDir, name), Buffer.from(res.data));

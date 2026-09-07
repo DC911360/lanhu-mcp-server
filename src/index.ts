@@ -7,11 +7,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { LanhuClient } from "./client.js";
 import { registerTools } from "./tools.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json") as { version: string };
 
 /** Claude Code 配置文件路径 */
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
@@ -491,10 +494,10 @@ async function main() {
   // 创建蓝湖 API 客户端
   const client = new LanhuClient(cookie, authorization, tenantId, projectId);
 
-  // 创建 MCP Server
+  // 创建 MCP Server（版本号从 package.json 动态读取，始终与发布版本一致）
   const server = new McpServer({
     name: "lanhu-mcp-server",
-    version: "1.2.0",
+    version: pkg.version,
   });
 
   // 注册所有 Tools

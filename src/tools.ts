@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { LanhuClient } from "./client.js";
 import { generateVueCode, generateHTMLCode } from "./dds-codegen.js";
 import { downloadDesign } from "./dds-puppeteer.js";
+import { assertSafeOutputPath } from "./utils/path-guard.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -40,6 +41,7 @@ function withErrorLogging<T extends Record<string, unknown>>(
   handler: (args: T) => Promise<{ content: Array<{ type: "text"; text: string }> }>
 ): (args: T) => Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
   return async (args: T) => {
+    console.log(`>>> 本地 MCP 被调用了！ [${toolName}]`, JSON.stringify(args));
     try {
       return await handler(args);
     } catch (error) {
@@ -111,7 +113,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
     {
       parentId: z.number().optional().describe("父文件夹 ID，默认 0（根目录）"),
     },
-    async ({ parentId }) => {
+    withErrorLogging("lanhu_list_projects", async ({ parentId }) => {
       const files = await client.getWorkbenchFiles(parentId ?? 0);
       return {
         content: [{
@@ -121,7 +123,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
             : "未找到项目，请检查 Cookie 和 tenantId",
         }],
       };
-    }
+    })
   );
 
   // ─── 设计稿 ───────────────────────────────────────────
@@ -132,7 +134,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
     {
       projectId: z.string().optional().describe("项目 UUID（sourceId），不传则使用配置的默认项目"),
     },
-    async ({ projectId }) => {
+    withErrorLogging("lanhu_get_designs", async ({ projectId }) => {
       const designs = await client.getDesigns(projectId);
       if (!designs.length) {
         return { content: [{ type: "text", text: "未找到设计稿" }] };
@@ -143,7 +145,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       return {
         content: [{ type: "text", text: `共 ${designs.length} 个设计稿：\n${lines.join("\n")}` }],
       };
-    }
+    })
   );
 
   server.tool(
@@ -153,12 +155,12 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       imageId: z.string().describe("设计稿 image_id"),
       projectId: z.string().optional().describe("项目 UUID，不传则使用默认项目"),
     },
-    async ({ imageId, projectId }) => {
+    withErrorLogging("lanhu_get_design_detail", async ({ imageId, projectId }) => {
       const detail = await client.getDesignDetail(imageId, projectId);
       return {
         content: [{ type: "text", text: JSON.stringify(detail, null, 2) }],
       };
-    }
+    })
   );
 
   // ── 标注/图层 ───────────────────────────────────────
@@ -172,7 +174,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       filter: z.string().optional().describe("按图层名过滤（模糊匹配，如 Button 或 Icon）"),
       includeStyles: z.boolean().default(true).describe("是否包含样式数据"),
     },
-    async ({ imageId, projectId, filter, includeStyles }) => {
+    withErrorLogging("lanhu_get_annotations", async ({ imageId, projectId, filter, includeStyles }) => {
       const annotations = await client.getAnnotations(imageId, projectId, { filter, includeStyles });
       if (!annotations.length) {
         return { content: [{ type: "text", text: `无标注数据${filter ? `（匹配 "${filter}"）` : ""}` }] };
@@ -183,7 +185,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
           text: `共 ${annotations.length} 个标注元素：\n${JSON.stringify(annotations, null, 2)}`,
         }],
       };
-    }
+    })
   );
 
   // ─── 预览图 ───────────────────────────────────────────
@@ -195,12 +197,12 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       imageId: z.string().describe("设计稿 image_id"),
       projectId: z.string().optional().describe("项目 UUID"),
     },
-    async ({ imageId, projectId }) => {
+    withErrorLogging("lanhu_get_preview", async ({ imageId, projectId }) => {
       const url = await client.getPreviewUrl(imageId, projectId);
       return {
         content: [{ type: "text", text: url || "无预览图" }],
       };
-    }
+    })
   );
 
   // ─── Design Tokens ───────────────────────────────────
@@ -211,7 +213,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
     {
       projectId: z.string().optional().describe("项目 UUID"),
     },
-    async ({ projectId }) => {
+    withErrorLogging("lanhu_get_tokens", async ({ projectId }) => {
       const tokens = await client.getDesignTokens(projectId);
       return {
         content: [{
@@ -221,7 +223,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
             : "无 Token 数据",
         }],
       };
-    }
+    })
   );
 
   // ── 项目分区 ────────────────────────────────────────
@@ -232,12 +234,12 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
     {
       projectId: z.string().optional().describe("项目 UUID"),
     },
-    async ({ projectId }) => {
+    withErrorLogging("lanhu_get_sectors", async ({ projectId }) => {
       const sectors = await client.getProjectSectors(projectId);
       return {
         content: [{ type: "text", text: JSON.stringify(sectors, null, 2) }],
       };
-    }
+    })
   );
 
   // ── 设置项目（从 URL 自动提取 projectId）★★★ ────────
@@ -248,7 +250,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
     {
       url: z.string().describe("蓝湖项目 URL 或 projectId UUID。例如：https://lanhuapp.com/web/#/item/project/detailDetach?pid=xxx&project_id=xxx"),
     },
-    async ({ url }) => {
+    withErrorLogging("lanhu_set_project", async ({ url }) => {
       const trimmed = url.trim();
       let projectId: string | null = null;
 
@@ -275,7 +277,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       await client.autoDiscover();
 
       return { content: [{ type: "text", text: `✅ 已设置默认项目：\n  projectId: ${projectId}\n  tenantId: ${client.getTenantId() || "0"}\n\n后续工具调用无需再传 projectId。` }] };
-    }
+    })
   );
 
   // ── DDS 语义化 UI 组件树 ★★★ ────────────────────────
@@ -287,10 +289,10 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       imageId: z.string().describe("设计稿 image_id"),
       versionId: z.string().optional().describe("版本 ID（不传则自动获取最新版）"),
     },
-    async ({ imageId, versionId }) => {
+    withErrorLogging("lanhu_get_dds_schema", async ({ imageId, versionId }) => {
       const schema = await client.getDDSSchema(versionId, imageId, client.getProjectId());
       return { content: [{ type: "text", text: JSON.stringify(schema, null, 2) }] };
-    }
+    })
   );
 
   // ── DDS 代码生成 ★★★ ─────────────────────────────────
@@ -302,9 +304,12 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       imageId: z.string().describe("设计稿 image_id"),
       format: z.enum(["vue", "html"]).default("vue").describe("输出格式：vue 或 html"),
       outputPath: z.string().optional().describe("输出目录（不传则返回代码内容）"),
+      projectId: z.string().optional().describe("项目 UUID"),
     },
-    async ({ imageId, format, outputPath }) => {
-      const schema = await client.getDDSSchema(undefined, imageId, client.getProjectId()) as any;
+    withErrorLogging("lanhu_generate_code", async ({ imageId, format, outputPath, projectId }) => {
+      const pid = projectId || client.getProjectId();
+      if (!pid) throw new Error("请提供 projectId 或通过 lanhu_set_project 设置默认项目");
+      const schema = await client.getDDSSchema(undefined, imageId, pid) as any;
 
       let result;
       if (format === "vue") {
@@ -315,7 +320,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
 
       // 如果指定了输出目录，写入文件
       if (outputPath) {
-        const dir = path.resolve(outputPath);
+        const dir = assertSafeOutputPath(outputPath);
         fs.mkdirSync(dir, { recursive: true });
         for (const file of result.files) {
           fs.writeFileSync(path.join(dir, file.name), file.content, "utf-8");
@@ -324,7 +329,7 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       }
 
       return { content: result.files.map(f => ({ type: "text" as const, text: `=== ${f.name} ===\n${f.content}` })) };
-    }
+    })
   );
 
   // ── ★★★ 一键下载设计稿（DDS 官方代码 + 图片）★★★ ─────
@@ -341,10 +346,11 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       const pid = projectId || client.getProjectId();
       if (!pid) throw new Error("请提供 projectId 或配置默认项目");
 
+      const safeOutputPath = assertSafeOutputPath(outputPath);
       const cookie = process.env.LANHU_COOKIE || "";
       const authorization = process.env.LANHU_AUTHORIZATION || "";
 
-      const result = await downloadDesign(imageId, pid, cookie, authorization, outputPath);
+      const result = await downloadDesign(imageId, pid, cookie, authorization, safeOutputPath);
 
       return {
         content: [{
@@ -374,12 +380,13 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       outputPath: z.string().describe("输出目录路径"),
       projectId: z.string().optional().describe("项目 UUID"),
     },
-    async ({ imageId, outputPath, projectId }) => {
-      const filePath = await client.downloadCover(imageId, outputPath, projectId);
+    withErrorLogging("lanhu_download_cover", async ({ imageId, outputPath, projectId }) => {
+      const safeOutputPath = assertSafeOutputPath(outputPath);
+      const filePath = await client.downloadCover(imageId, safeOutputPath, projectId);
       return {
         content: [{ type: "text", text: `封面图已下载：${filePath}` }],
       };
-    }
+    })
   );
 
   server.tool(
@@ -390,11 +397,29 @@ export function registerTools(server: McpServer, client: LanhuClient): void {
       fileName: z.string().describe("保存文件名"),
       outputPath: z.string().describe("输出目录路径"),
     },
-    async ({ url, fileName, outputPath }) => {
-      const filePath = await client.downloadSlice(url, fileName, outputPath);
+    withErrorLogging("lanhu_download_image", async ({ url, fileName, outputPath }) => {
+      // SSRF 防护：仅允许 HTTPS 协议的蓝湖域名
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "https:") {
+          throw new Error(`仅允许 HTTPS 协议，当前: ${parsed.protocol}`);
+        }
+        const allowedHosts = ["lanhuapp.com", "lanhu.com", "qhimg.com", "qhres.com"];
+        const host = parsed.hostname.replace(/^cdn\./, "").replace(/^dds\./, "");
+        if (!allowedHosts.some(h => host === h || host.endsWith(`.${h}`))) {
+          throw new Error(`不允许的域名: ${parsed.hostname}`);
+        }
+      } catch (urlErr) {
+        if (urlErr instanceof Error && urlErr.message.startsWith("仅允许") || urlErr instanceof Error && urlErr.message.startsWith("不允许")) {
+          throw urlErr;
+        }
+        throw new Error(`无效的图片 URL: ${url}`);
+      }
+      const safeOutputPath = assertSafeOutputPath(outputPath);
+      const filePath = await client.downloadSlice(url, fileName, safeOutputPath);
       return {
         content: [{ type: "text", text: `图片已下载：${filePath}` }],
       };
-    }
+    })
   );
 }

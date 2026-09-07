@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>蓝湖 MCP Server - 测试工具</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ─── Header ───────────────────────────────────── */
+  .header {
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 52px;
+  }
+  .header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f8fafc;
+  }
+  .header .badge {
+    background: #22c55e;
+    color: #000;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+
+  /* ─── Layout ───────────────────────────────────── */
+  .main {
+    display: flex;
+    height: calc(100vh - 52px);
+  }
+
+  /* ─── Left Panel ───────────────────────────────── */
+  .left-panel {
+    width: 360px;
+    min-width: 320px;
+    background: #1e293b;
+    border-right: 1px solid #334155;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ─── Credentials ───────────────────────────────── */
+  .credential-section {
+    padding: 12px;
+    border-bottom: 1px solid #334155;
+    background: #162032;
+  }
+  .credential-section .param-group {
+    margin-bottom: 8px;
+  }
+  .credential-section .param-group:last-child {
+    margin-bottom: 0;
+  }
+  .credential-section label {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 4px;
+    display: block;
+  }
+  .credential-section input {
+    width: 100%;
+    padding: 7px 10px;
+    background: #0f172a;
+    color: #e2e8f0;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    font-size: 12px;
+    outline: none;
+  }
+  .credential-section input:focus {
+    border-color: #3b82f6;
+  }
+  .credential-section input::placeholder {
+    color: #64748b;
+  }
+
+  .tool-selector {
+    padding: 12px;
+    border-bottom: 1px solid #334155;
+  }
+  .tool-selector label {
+    font-size: 11px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .tool-selector select {
+    width: 100%;
+    padding: 8px 12px;
+    background: #0f172a;
+    color: #e2e8f0;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+  }
+  .tool-selector select:focus {
+    border-color: #3b82f6;
+  }
+
+  .params-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+  }
+  .param-group {
+    margin-bottom: 12px;
+  }
+  .param-group label {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-bottom: 4px;
+    display: block;
+  }
+  .param-group label .required {
+    color: #ef4444;
+  }
+  .param-group input,
+  .param-group select {
+    width: 100%;
+    padding: 8px 10px;
+    background: #0f172a;
+    color: #e2e8f0;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+  }
+  .param-group input:focus,
+  .param-group select:focus {
+    border-color: #3b82f6;
+  }
+  .param-group input::placeholder {
+    color: #64748b;
+  }
+  .param-group input[readonly] {
+    background: #1e293b;
+    color: #94a3b8;
+    cursor: default;
+    border-color: #334155;
+  }
+
+  /* 蓝湖URL 输入框 */
+  .url-input-group {
+    padding: 12px;
+    border-bottom: 1px solid #334155;
+    background: #162032;
+  }
+  .url-input-group label {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 4px;
+    display: block;
+  }
+  .url-input-group input {
+    width: 100%;
+    padding: 7px 10px;
+    background: #0f172a;
+    color: #e2e8f0;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    font-size: 12px;
+    outline: none;
+  }
+  .url-input-group input:focus {
+    border-color: #3b82f6;
+  }
+  .url-input-group input::placeholder {
+    color: #475569;
+  }
+  .url-input-group .url-hint {
+    font-size: 10px;
+    color: #475569;
+    margin-top: 3px;
+    line-height: 1.3;
+  }
+
+  .btn-run {
+    margin: 12px;
+    padding: 10px;
+    background: #3b82f6;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-run:hover { background: #2563eb; }
+  .btn-run:active { background: #1d4ed8; }
+  .btn-run:disabled {
+    background: #475569;
+    cursor: not-allowed;
+  }
+
+  /* ─── Right Panel ──────────────────────────────── */
+  .right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .result-tabs {
+    display: flex;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+  }
+  .result-tab {
+    padding: 10px 20px;
+    font-size: 13px;
+    color: #94a3b8;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .result-tab.active {
+    color: #f8fafc;
+    border-bottom-color: #3b82f6;
+  }
+  .result-tab:hover { color: #e2e8f0; }
+
+  .result-content {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+  }
+  .result-view {
+    display: none;
+    overflow: auto;
+    height: 100%;
+  }
+  .result-view.active { display: block; }
+
+  /* JSON View */
+  #json-view {
+    padding: 16px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre;
+    word-break: normal;
+    color: #a5f3fc;
+  }
+
+  /* Code View */
+  #code-view {
+    display: none;
+    flex-direction: row;
+    height: 100%;
+  }
+  #code-view.active { display: flex; }
+  .code-pane {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    color: #e2e8f0;
+    background: #0f172a;
+  }
+  .preview-pane {
+    flex: 1;
+    border-left: 1px solid #334155;
+  }
+  .preview-pane iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #fff;
+  }
+
+  /* Image View */
+  #image-view {
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #image-view img {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+
+  /* Status */
+  .status-bar {
+    padding: 8px 16px;
+    background: #1e293b;
+    border-top: 1px solid #334155;
+    font-size: 12px;
+    color: #64748b;
+    display: flex;
+    justify-content: space-between;
+  }
+  .status-bar .success { color: #22c55e; }
+  .status-bar .error { color: #ef4444; }
+  .status-bar .loading { color: #eab308; }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #475569;
+  }
+  .empty-state .icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+  .empty-state p {
+    font-size: 14px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #0f172a; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #475569; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🔵 蓝湖 MCP Server — 测试工具</h1>
+  <span class="badge" id="connection-status">就绪</span>
+</div>
+
+<div class="main">
+  <!-- Left Panel: Credentials + Tool Selector + Params -->
+  <div class="left-panel">
+    <!-- Credentials Section -->
+    <div class="credential-section">
+      <div class="param-group">
+        <label>🔑 Cookie</label>
+        <input type="text" id="input-cookie" placeholder="蓝湖 Cookie">
+      </div>
+      <div class="param-group">
+        <label>🔑 Authorization</label>
+        <input type="text" id="input-auth" placeholder="蓝湖 Authorization">
+      </div>
+    </div>
+
+    <!-- 蓝湖 URL 解析 -->
+    <div class="url-input-group">
+      <label>🔗 蓝湖 URL</label>
+      <input type="text" id="input-url" placeholder="粘贴蓝湖设计稿URL，自动解析 imageId / projectId">
+      <div class="url-hint">支持完整URL（含 #）或直接粘贴含参数的URL片段</div>
+    </div>
+
+    <div class="tool-selector">
+      <label>选择工具</label>
+      <select id="tool-select">
+        <option value="">— 请选择 —</option>
+        <option value="lanhu_list_projects">📁 项目列表</option>
+        <option value="lanhu_get_designs">🖼️ 设计稿列表</option>
+        <option value="lanhu_get_design_detail">📄 设计稿详情</option>
+        <option value="lanhu_get_design_document">🌳 设计文档(图层树)</option>
+        <option value="lanhu_get_layer_detail">🔍 图层详情</option>
+        <option value="lanhu_get_annotations">📝 标注列表</option>
+        <option value="lanhu_get_dds_schema">🤖 DDS 语义树</option>
+        <option value="lanhu_generate_code">⚡ 生成代码</option>
+        <option value="lanhu_get_preview">👁️ 预览图</option>
+        <option value="lanhu_get_tokens">🎨 Design Tokens</option>
+        <option value="lanhu_get_sectors">📂 项目分区</option>
+        <option value="lanhu_set_project">🔗 设置项目(URL)</option>
+        <option value="lanhu_download_cover">📥 下载封面</option>
+        <option value="lanhu_download_design"> 下载完整设计</option>
+      </select>
+    </div>
+
+    <div class="params-area" id="params-area">
+      <!-- 动态生成参数表单 -->
+    </div>
+
+    <button class="btn-run" id="btn-run" disabled>▶ 执行</button>
+  </div>
+
+  <!-- Right Panel: Results -->
+  <div class="right-panel">
+    <div class="result-tabs" id="result-tabs" style="display:none">
+      <div class="result-tab active" data-view="json">JSON</div>
+      <div class="result-tab" data-view="code" id="tab-code" style="display:none">代码预览</div>
+      <div class="result-tab" data-view="image" id="tab-image" style="display:none">图片预览</div>
+    </div>
+
+    <div class="result-content">
+      <!-- Empty State -->
+      <div class="result-view active" id="empty-view">
+        <div class="empty-state">
+          <div class="icon">🔧</div>
+          <p>选择工具并点击"执行"开始测试</p>
+        </div>
+      </div>
+
+      <!-- JSON View -->
+      <div class="result-view" id="json-view"></div>
+
+      <!-- Code View (split pane) -->
+      <div class="result-view" id="code-view">
+        <div class="code-pane" id="code-pane"></div>
+        <div class="preview-pane">
+          <iframe id="preview-frame" sandbox="allow-scripts"></iframe>
+        </div>
+      </div>
+
+      <!-- Image View -->
+      <div class="result-view" id="image-view">
+        <img id="preview-image" src="" alt="预览图">
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <span id="status-text">等待操作</span>
+      <span id="status-time"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── 工具参数定义 ────────────────────────────────────
+// 全局解析状态（URL 解析结果）
+let parsedUrlData = { imageId: "", projectId: "" };
+
+// ─── 蓝湖 URL 解析 ────────────────────────────────────
+function parseLanhuUrl(url) {
+  if (!url) return { imageId: "", projectId: "" };
+
+  // 提取 URL 中所有查询参数（支持 hash URL 如 #/...?key=val&key2=val2）
+  let queryString = "";
+  const hashIdx = url.indexOf("#");
+  const afterHash = hashIdx >= 0 ? url.substring(hashIdx) : url;
+  const qIdx = afterHash.indexOf("?");
+  if (qIdx >= 0) {
+    queryString = afterHash.substring(qIdx + 1);
+  } else {
+    // 没有 #? 的普通 URL
+    const qIdx2 = url.indexOf("?");
+    if (qIdx2 >= 0) queryString = url.substring(qIdx2 + 1);
+  }
+
+  if (!queryString) return { imageId: "", projectId: "" };
+
+  const params = new URLSearchParams(queryString);
+  const imageId = params.get("image_id") || "";
+  const projectId = params.get("project_id") || params.get("pid") || "";
+
+  return { imageId, projectId };
+}
+
+const TOOL_PARAMS = {
+  lanhu_list_projects: [
+    { name: "parentId", type: "text", placeholder: "父目录ID（默认 0）", required: false },
+  ],
+  lanhu_get_designs: [
+    { name: "projectId", type: "text", placeholder: "项目ID (UUID)", required: false },
+  ],
+  lanhu_get_design_detail: [
+    { name: "imageId", type: "text", placeholder: "设计稿ID", required: true, readonly: true },
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false, readonly: true },
+  ],
+  lanhu_get_design_document: [
+    { name: "imageId", type: "text", placeholder: "设计稿ID", required: true, readonly: true },
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false, readonly: true },
+    { name: "depth", type: "number", placeholder: "深度（默认 2）", required: false },
+    { name: "includeStyles", type: "checkbox", label: "包含样式", required: false, default: true },
+    { name: "includeRaw", type: "checkbox", label: "包含原始数据", required: false },
+  ],
+  lanhu_get_layer_detail: [
+    { name: "imageId", type: "text", placeholder: "设计稿ID", required: true, readonly: true },
+    { name: "layerId", type: "text", placeholder: "图层ID", required: true },
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false, readonly: true },
+  ],
+  lanhu_get_annotations: [
+    { name: "imageId", type: "text", placeholder: "设计稿ID", required: true, readonly: true },
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false, readonly: true },
+    { name: "filter", type: "text", placeholder: "模糊搜索图层名", required: false },
+    { name: "includeStyles", type: "checkbox", label: "包含样式", required: false, default: true },
+  ],
+  lanhu_get_dds_schema: [
+    { name: "imageId", type: "text", placeholder: "设计稿ID", required: true, readonly: true },
+    { name: "versionId", type: "text", placeholder: "版本ID", required: false },
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false, readonly: true },
+  ],
+  lanhu_generate_code: [
+    { name: "imageId", type: "text", placeholder: "设计稿ID", required: true, readonly: true },
+    { name: "format", type: "select", options: ["html", "vue"], default: "html", required: false },
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false, readonly: true },
+  ],
+  lanhu_get_preview: [
+    { name: "imageId", type: "text", placeholder: "设计稿ID", required: true, readonly: true },
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false, readonly: true },
+  ],
+  lanhu_get_tokens: [
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false },
+  ],
+  lanhu_get_sectors: [
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false },
+  ],
+  lanhu_set_project: [
+    { name: "url", type: "text", placeholder: "蓝湖项目URL", required: true },
+  ],
+  lanhu_download_cover: [
+    { name: "imageId", type: "text", placeholder: "设计稿ID", required: true, readonly: true },
+    { name: "outputPath", type: "text", placeholder: "输出目录（默认 /tmp/lanhu-covers）", required: false },
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false, readonly: true },
+  ],
+  lanhu_download_design: [
+    { name: "imageId", type: "text", placeholder: "设计稿ID", required: true, readonly: true },
+    { name: "outputPath", type: "text", placeholder: "输出目录（默认 /tmp/lanhu-designs）", required: false },
+    { name: "projectId", type: "text", placeholder: "项目ID", required: false, readonly: true },
+  ],
+};
+
+// ─── DOM 元素 ───────────────────────────────────────
+const toolSelect = document.getElementById("tool-select");
+const paramsArea = document.getElementById("params-area");
+const btnRun = document.getElementById("btn-run");
+const resultTabs = document.getElementById("result-tabs");
+const statusText = document.getElementById("status-text");
+const statusTime = document.getElementById("status-time");
+const connectionStatus = document.getElementById("connection-status");
+const inputCookie = document.getElementById("input-cookie");
+const inputAuth = document.getElementById("input-auth");
+const inputUrl = document.getElementById("input-url");
+
+// ─── localStorage 持久化凭证 ─────────────────────────
+inputCookie.value = localStorage.getItem("lanhu_cookie") || "";
+inputAuth.value = localStorage.getItem("lanhu_auth") || "";
+inputUrl.value = localStorage.getItem("lanhu_url") || "";
+inputCookie.addEventListener("input", () => localStorage.setItem("lanhu_cookie", inputCookie.value));
+inputAuth.addEventListener("input", () => localStorage.setItem("lanhu_auth", inputAuth.value));
+
+// ─── 蓝湖 URL 解析 ───────────────────────────────────
+function applyUrlParse() {
+  const url = inputUrl.value.trim();
+  const result = parseLanhuUrl(url);
+  parsedUrlData.imageId = result.imageId || "";
+  parsedUrlData.projectId = result.projectId || "";
+
+  // 更新现有表单中的 imageId / projectId 字段
+  const imageIdEl = paramsArea.querySelector('[name="imageId"]');
+  const projectIdEl = paramsArea.querySelector('[name="projectId"]');
+
+  if (imageIdEl) {
+    imageIdEl.value = parsedUrlData.imageId;
+    if (parsedUrlData.imageId) {
+      imageIdEl.setAttribute("readonly", "readonly");
+    } else {
+      imageIdEl.removeAttribute("readonly");
+    }
+  }
+  if (projectIdEl) {
+    projectIdEl.value = parsedUrlData.projectId;
+    if (parsedUrlData.projectId) {
+      projectIdEl.setAttribute("readonly", "readonly");
+    } else {
+      projectIdEl.removeAttribute("readonly");
+    }
+  }
+
+  // 更新 URL 输入框的边框颜色（解析成功=绿色）
+  if (result.imageId && result.projectId) {
+    inputUrl.style.borderColor = "#22c55e";
+  } else if (url) {
+    inputUrl.style.borderColor = "#eab308";
+  } else {
+    inputUrl.style.borderColor = "#475569";
+  }
+
+  // 持久化
+  localStorage.setItem("lanhu_url", url);
+}
+
+inputUrl.addEventListener("input", applyUrlParse);
+inputUrl.addEventListener("blur", applyUrlParse);
+// 页面加载时如果有缓存的URL，自动解析
+if (inputUrl.value) {
+  setTimeout(applyUrlParse, 100);
+}
+
+// ─── 渲染参数表单 ────────────────────────────────────
+toolSelect.addEventListener("change", () => {
+  const toolName = toolSelect.value;
+  btnRun.disabled = !toolName;
+  renderParams(toolName);
+});
+
+function renderParams(toolName) {
+  const params = TOOL_PARAMS[toolName] || [];
+  paramsArea.innerHTML = params.map(p => {
+    if (p.type === "checkbox") {
+      return `<div class="param-group">
+        <label><input type="checkbox" name="${p.name}" ${p.default ? "checked" : ""}> ${p.label}</label>
+      </div>`;
+    }
+    if (p.type === "select") {
+      const opts = (p.options || []).map(o =>
+        `<option value="${o}" ${o === p.default ? "selected" : ""}>${o}</option>`
+      ).join("");
+      return `<div class="param-group">
+        <label>${p.name} ${p.required ? '<span class="required">*</span>' : ""}</label>
+        <select name="${p.name}">${opts}</select>
+      </div>`;
+    }
+    // 判断是否是 URL 解析字段（imageId / projectId）
+    const isUrlField = p.name === "imageId" || p.name === "projectId";
+    const isReadonly = p.readonly && isUrlField;
+    const urlValue = isUrlField ? (p.name === "imageId" ? parsedUrlData.imageId : parsedUrlData.projectId) : "";
+    const hasUrlValue = urlValue !== "";
+    return `<div class="param-group">
+      <label>${p.name} ${p.required ? '<span class="required">*</span>' : ""}${hasUrlValue ? ' <span style="color:#22c55e;font-size:10px">🔗 URL解析</span>' : ""}</label>
+      <input type="${p.type}" name="${p.name}" placeholder="${p.placeholder || ""}" ${isReadonly ? "readonly" : ""} ${hasUrlValue ? `value="${urlValue}"` : (p.default !== undefined ? `value="${p.default}"` : "")}>
+    </div>`;
+  }).join("");
+}
+
+// ─── 执行工具 ────────────────────────────────────────
+btnRun.addEventListener("click", executeTool);
+
+async function executeTool() {
+  const toolName = toolSelect.value;
+  if (!toolName) return;
+
+  // 获取凭证
+  const cookie = inputCookie.value.trim();
+  const auth = inputAuth.value.trim();
+
+  if (!cookie) {
+    statusText.className = "error";
+    statusText.textContent = "❌ 请先填写 Cookie";
+    statusTime.textContent = "";
+    return;
+  }
+
+  // 收集参数
+  const params = {};
+  paramsArea.querySelectorAll("[name]").forEach(el => {
+    if (el.type === "checkbox") {
+      params[el.name] = el.checked;
+    } else {
+      params[el.name] = el.value;
+    }
+  });
+
+  // 清理空值
+  Object.keys(params).forEach(k => {
+    if (params[k] === "" || params[k] === undefined) delete params[k];
+  });
+
+  // 附带凭证
+  params.__cookie = cookie;
+  if (auth) params.__auth = auth;
+
+  // UI 状态
+  btnRun.disabled = true;
+  btnRun.textContent = "⏳ 执行中...";
+  statusText.className = "loading";
+  statusText.textContent = `正在调用 ${toolName}...`;
+  const startTime = Date.now();
+
+  try {
+    const res = await fetch(`/api/tools/${toolName}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    const elapsed = Date.now() - startTime;
+    statusText.className = "success";
+    statusText.textContent = `✅ ${toolName} 执行成功`;
+    statusTime.textContent = `${elapsed}ms`;
+
+    // 展示结果
+    showResult(toolName, data);
+    connectionStatus.textContent = "已连接";
+    connectionStatus.style.background = "#22c55e";
+
+  } catch (err) {
+    const elapsed = Date.now() - startTime;
+    statusText.className = "error";
+    statusText.textContent = `❌ ${err.message}`;
+    statusTime.textContent = `${elapsed}ms`;
+
+    document.getElementById("json-view").textContent = JSON.stringify({ error: err.message }, null, 2);
+    showView("json");
+  } finally {
+    btnRun.disabled = false;
+    btnRun.textContent = "▶ 执行";
+  }
+}
+
+// ─── JSON 格式化（展开 content 字段中的 \n） ────────────
+function formatJSON(data) {
+  let json = JSON.stringify(data, null, 2);
+  // 将 "content": "...\n..." 中的 \n 替换为真实换行（带缩进）
+  return json.replace(/\\n/g, "\n");
+}
+
+// ─── 展示结果 ────────────────────────────────────────
+function showResult(toolName, data) {
+  resultTabs.style.display = "flex";
+
+  // 默认显示 JSON（格式化 + 内容字段展开换行）
+  document.getElementById("json-view").textContent = formatJSON(data);
+
+  // 代码生成 → 显示代码预览
+  const tabCode = document.getElementById("tab-code");
+  const tabImage = document.getElementById("tab-image");
+  tabCode.style.display = "none";
+  tabImage.style.display = "none";
+
+  if (toolName === "lanhu_generate_code") {
+    tabCode.style.display = "block";
+    const files = data.files || [];
+    const file = files[0];
+    if (file) {
+      document.getElementById("code-pane").textContent = file.content;
+      const iframe = document.getElementById("preview-frame");
+      iframe.srcdoc = file.content;
+    }
+  }
+
+  // 预览图 → 显示图片
+  if (toolName === "lanhu_get_preview") {
+    tabImage.style.display = "block";
+    const imgUrl = data.url || data.previewUrl || data;
+    document.getElementById("preview-image").src = typeof imgUrl === "string" ? imgUrl : "";
+  }
+
+  showView("json");
+}
+
+// ─── 标签切换 ────────────────────────────────────────
+document.querySelectorAll(".result-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    const view = tab.dataset.view;
+    showView(view);
+  });
+});
+
+function showView(view) {
+  document.querySelectorAll(".result-tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".result-view").forEach(v => v.classList.remove("active"));
+
+  const tab = document.querySelector(`.result-tab[data-view="${view}"]`);
+  if (tab) tab.classList.add("active");
+
+  const viewEl = document.getElementById(`${view}-view`);
+  if (viewEl) viewEl.classList.add("active");
+}
+
+// 初始化
+renderParams("");
+</script>
+</body>
+</html>
